@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 
 import httpx
@@ -12,7 +13,9 @@ from loguru import logger
 from jarvis.engine.proactive.collectors.base import CollectorBase
 from jarvis.engine.proactive.schemas import ContextItem, ItemType, Priority
 from jarvis.kernel.connectivity import is_offline_mode
+from jarvis.kernel.contracts import CanonicalMemoryStore
 from jarvis.kernel.error_collector import collector  # jrv: autofix
+from jarvis.kernel.holmes_memory import CanonicalMemoryEvent, MemorySource
 from jarvis.kernel.settings import settings
 
 
@@ -20,6 +23,10 @@ class HomeAssistantCollector(CollectorBase):
     """Collecteur proactif Home Assistant — alarme, fuites, fumée, etc."""
 
     name = "home_assistant"
+
+    def __init__(self, canonical_memory: CanonicalMemoryStore | None = None) -> None:
+        self._canonical_memory = canonical_memory
+        self._recorded_event_ids: set[str] = set()
 
     async def _collect(self) -> list[ContextItem]:
         token = settings.home_assistant_token.get_secret_value()
@@ -45,8 +52,7 @@ class HomeAssistantCollector(CollectorBase):
 
                 alarm_states = ("triggered", "arming", "pending")
                 if domain == "alarm_control_panel" and current_state in alarm_states:
-                    critical_entities.append(
-                        ContextItem(
+                    item = ContextItem(
                             type=ItemType.NEWS,
                             title=f"🚨 ALARME DÉCLENCHÉE — {friendly}",
                             summary=f"L'alarme est en état **{current_state}**",
@@ -55,14 +61,14 @@ class HomeAssistantCollector(CollectorBase):
                             timestamp=datetime.now(),
                             priority=Priority.HIGH,
                             metadata={"entity_id": entity_id, "state": current_state},
-                        )
                     )
+                    critical_entities.append(item)
+                    await self._record_critical_event(item, state)
 
                 elif domain == "binary_sensor" and current_state == "on":
                     device_class = state.get("attributes", {}).get("device_class", "")
                     if device_class in ("smoke", "gas", "moisture", "leak", "carbon_monoxide"):
-                        critical_entities.append(
-                            ContextItem(
+                        item = ContextItem(
                                 type=ItemType.NEWS,
                                 title=f"⚠️ {friendly} — {device_class.upper()}",
                                 summary=f"Capteur **{device_class}** activé",
@@ -71,8 +77,9 @@ class HomeAssistantCollector(CollectorBase):
                                 timestamp=datetime.now(),
                                 priority=Priority.HIGH,
                                 metadata={"entity_id": entity_id, "device_class": device_class},
-                            )
                         )
+                        critical_entities.append(item)
+                        await self._record_critical_event(item, state)
 
             return critical_entities
 
@@ -80,3 +87,33 @@ class HomeAssistantCollector(CollectorBase):
             collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=e)
             logger.warning(f"HomeAssistantCollector error: {e}")
             return []
+
+    async def _record_critical_event(self, item: ContextItem, state: dict) -> None:
+        """Mémorise une alerte critique une seule fois par changement d'état."""
+        if self._canonical_memory is None:
+            return
+
+        entity_id = str(state.get("entity_id", "unknown"))
+        changed_at = str(state.get("last_changed", ""))
+        fingerprint = f"{entity_id}|{state.get('state', '')}|{changed_at}"
+        event_id = "ha_" + hashlib.sha256(fingerprint.encode()).hexdigest()[:24]
+        if event_id in self._recorded_event_ids:
+            return
+
+        event = CanonicalMemoryEvent(
+            event_id=event_id,
+            source=MemorySource.HOME_ASSISTANT,
+            content=f"{item.title}\n\n{item.summary}",
+            metadata={
+                "entity_id": entity_id,
+                "state": state.get("state", ""),
+                "last_changed": changed_at,
+                "device_class": state.get("attributes", {}).get("device_class", ""),
+            },
+        )
+        try:
+            await self._canonical_memory.append_event(event)
+            self._recorded_event_ids.add(event_id)
+        except Exception as exc:  # noqa: BLE001 — l'alerte UI reste prioritaire
+            collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=exc)
+            logger.warning("Home Assistant → Soul write failed", error=str(exc))

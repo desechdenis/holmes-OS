@@ -29,19 +29,30 @@ _SCOPES_GMAIL = [
 _SCOPES_CALENDAR = ["https://www.googleapis.com/auth/calendar"]
 
 # Endpoints OAuth2 Google — constants, communs à toutes les apps.
-_GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+# OAuth v2 est l'endpoint documenté pour les nouvelles autorisations Web.
+# L'ancien chemin ``/o/oauth2/auth`` peut encore être rencontré dans des
+# configurations historiques, mais ne doit pas être émis par Holmes.
+_GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 _GOOGLE_CERT_URI = "https://www.googleapis.com/oauth2/v1/certs"
+
+# Google compare les URI caractère par caractère.  ``localhost`` est la forme
+# documentée et acceptée par les clients OAuth Web de Google pour un test local;
+# Holmes doit donc l'utiliser de façon stable, quel que soit l'alias employé
+# dans le navigateur.
+_LOCAL_OAUTH_ORIGIN = "http://localhost:8000"
 
 # In-memory state store (single-user JARVIS)
 _pending: dict[str, dict] = {}
 
 
-def _redirect_uri(request: Request, service: str) -> str:
-    base = str(request.base_url).rstrip("/")
-    if not base.startswith("https://") and "127.0.0.1" not in base and "localhost" not in base:
-        base = base.replace("http://", "https://", 1)
-    return f"{base}/api/google/callback/{service}"
+def _redirect_uri(_request: Request, service: str) -> str:
+    """Return the single, documented local callback accepted by Google.
+
+    Keeping this stable avoids ``redirect_uri_mismatch`` depending on the URL
+    used to open Holmes.
+    """
+    return f"{_LOCAL_OAUTH_ORIGIN}/api/google/callback/{service}"
 
 
 def _credentials_path() -> Path:

@@ -555,7 +555,7 @@ class SkillLab:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python",
+                sys.executable,
                 str(script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

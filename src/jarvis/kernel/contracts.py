@@ -34,6 +34,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from jarvis.kernel.holmes_memory import CanonicalMemoryEvent
 from jarvis.kernel.schemas import (
     ContextItem,
     Event,
@@ -408,6 +409,24 @@ class MemoryIngest(Protocol):
         event_type: str = ...,
         metadata: dict[str, Any] | None = ...,
     ) -> Any: ...  # noqa: ANN401 — IngestResult défini en providers/memory/ingest.py
+
+
+@runtime_checkable
+class CanonicalMemoryStore(Protocol):
+    """Destination durable et canonique de Holmes (Soul à terme).
+
+    Ce contrat interdit aux producteurs de dépendre du transport MCP ou de
+    choisir eux-mêmes la structure des notes Soul.
+    """
+
+    async def append_event(self, event: CanonicalMemoryEvent) -> str: ...
+
+
+@runtime_checkable
+class HomeStateLookup(Protocol):
+    """Lecture ciblée et read-only de l'état Home Assistant."""
+
+    async def lookup(self, query: str, limit: int = 6) -> str | None: ...
 
 
 @runtime_checkable

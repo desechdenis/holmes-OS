@@ -24,7 +24,6 @@ _GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 try:
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
 
     _HAS_GOOGLE = True
 except ImportError:
@@ -45,10 +44,11 @@ def _load_gmail_creds(credentials_path: Path, token_path: Path) -> Credentials:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            if not credentials_path.exists():
-                raise FileNotFoundError(f"Credentials Google manquants : {credentials_path}.")
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), _SCOPES)
-            creds = flow.run_local_server(port=0)
+            # OAuth is deliberately web-only.  A tool can be selected by an
+            # LLM or a proactive task, so it must not launch a browser itself.
+            raise RuntimeError(
+                "Compte Gmail non connecté. Ouvre Intégrations, puis connecte Gmail."
+            )
         token_path.write_text(creds.to_json())
 
     return creds
@@ -90,6 +90,10 @@ class GmailListTool(Tool):
 
         try:
             creds = await asyncio.to_thread(_load_gmail_creds, self._creds, self._token)
+        except RuntimeError as exc:
+            # An absent OAuth grant is a normal connector state, not a tool
+            # failure worth reporting to the system error collector.
+            return ToolResult(content=str(exc), is_error=True)
         except Exception as e:
             collector.error("JRV-TOL-001", "JRV-TOL-001", cause=e)
             return ToolResult(content=f"Erreur credentials Gmail : {e}", is_error=True)

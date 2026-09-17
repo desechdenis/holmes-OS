@@ -95,6 +95,7 @@ from jarvis.kernel.paths import CONFIG_DIR
 from jarvis.kernel.settings import Settings
 from jarvis.kernel.settings import settings as _default_settings
 from jarvis.providers.audio.tts import tts_engine
+from jarvis.providers.home_assistant import HomeAssistantStateReader
 from jarvis.providers.llm.base import LLMProvider
 from jarvis.providers.llm.factory import (
     create_background_llm,
@@ -110,6 +111,7 @@ from jarvis.providers.memory.kernel import MemoryKernel
 from jarvis.providers.memory.mirror import MemoryMirror
 from jarvis.providers.memory.search import FTSIndex, VectorIndex
 from jarvis.providers.memory.sessions import SessionStore
+from jarvis.providers.memory.soul import SoulMCPClient, SoulMemoryStore, SoulRecall
 from jarvis.providers.memory.topics import TopicStore
 from jarvis.providers.memory.user_model import UserModel
 
@@ -137,6 +139,10 @@ class Container:
     memory_ingest: MemoryIngest
     memory_mirror: MemoryMirror
     user_model: UserModel
+    soul_client: SoulMCPClient | None
+    canonical_memory: SoulMemoryStore | None
+    soul_recall: SoulRecall | None
+    home_state_reader: HomeAssistantStateReader | None
 
     # ── Providers L1 — LLM ─────────────────────────────────────────────────
     llm: LLMProvider
@@ -231,6 +237,17 @@ def build(
     fts_index = FTSIndex(db_path=memory_dir / "fts_index.db")
     memory_kernel = MemoryKernel(memory_dir / "jarvis_memory.db")
     memory_mirror = MemoryMirror(memory_kernel, memory_dir / "mirror")
+    soul_client = SoulMCPClient(settings.soul_mcp_url) if settings.soul_mcp_url else None
+    canonical_memory = (
+        SoulMemoryStore(soul_client, project=settings.soul_project or None) if soul_client else None
+    )
+    soul_recall = (
+        SoulRecall(soul_client, project=settings.soul_project or None) if soul_client else None
+    )
+    ha_token = settings.home_assistant_token.get_secret_value()
+    home_state_reader = (
+        HomeAssistantStateReader(settings.home_assistant_url, ha_token) if ha_token else None
+    )
 
     # ── 4. Engine L2 — UsageTracker (créé tôt pour injection dans les providers) ─
 
@@ -263,6 +280,7 @@ def build(
         memory_index=memory_index,
         topic_store=topic_store,
         memory_ingest=None,  # JAMAIS branché — choix d'archi (CDC §3 AutoDream micro).
+        canonical_memory=canonical_memory,
         user_firstname=settings.display_name,
         assistant_name=settings.display_assistant_name,
     )
@@ -400,7 +418,9 @@ def build(
 
     approval_checker = ApprovalChecker(broadcast_event=proactive_queue.broadcast_event)
     worker = BackgroundWorker(
-        llm=llm,
+        # Les tâches longues ne doivent pas concurrencer la conversation ;
+        # elles utilisent le provider dédié et son budget propre.
+        llm=background_llm,
         notifications=notifications,
         tool_registry=tool_registry,
         bus=bus,
@@ -426,14 +446,18 @@ def build(
         agent=agent,
         notifications=notifications,
         worker=worker,
-        recall=cross_recall,
+        recall=soul_recall or cross_recall,
+        home_state=home_state_reader,
+        calendar=calendar_list_tool,
     )
     voice_gateway = Gateway(
         session_manager=session_manager,
         agent=voice_agent,
         notifications=notifications,
         worker=worker,
-        recall=cross_recall,
+        recall=soul_recall or cross_recall,
+        home_state=home_state_reader,
+        calendar=calendar_list_tool,
     )
 
     # ── 14. Engine L2 — Proactive (initiatives + curator + command center) ─
@@ -466,6 +490,7 @@ def build(
         builder=ContextBuilder(
             calendar_tool=calendar_list_tool,
             notion_tool=notion_tasks_tool,
+            canonical_memory=canonical_memory,
         ),
         generator=InitiativeGenerator(
             llm=background_llm,
@@ -535,6 +560,10 @@ def build(
         memory_ingest=memory_ingest,
         memory_mirror=memory_mirror,
         user_model=user_model,
+        soul_client=soul_client,
+        canonical_memory=canonical_memory,
+        soul_recall=soul_recall,
+        home_state_reader=home_state_reader,
         # Providers L1 — LLM
         llm=llm,
         voice_llm=voice_llm,

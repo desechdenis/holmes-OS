@@ -23,7 +23,7 @@ from jarvis.engine.proactive.collectors.news import NewsCollector
 from jarvis.engine.proactive.collectors.tasks import TaskCollector
 from jarvis.engine.proactive.collectors.weather import WeatherCollector
 from jarvis.engine.proactive.schemas import CollectionResult, ContextItem, ItemType, Priority
-from jarvis.kernel.contracts import CalendarReadTool, NotionReadTool
+from jarvis.kernel.contracts import CalendarReadTool, CanonicalMemoryStore, NotionReadTool
 
 
 @dataclass
@@ -72,6 +72,7 @@ class ContextBuilder:
         self,
         calendar_tool: CalendarReadTool,
         notion_tool: NotionReadTool,
+        canonical_memory: CanonicalMemoryStore | None = None,
     ) -> None:
         self._collectors = [
             EmailCollector(),
@@ -80,7 +81,7 @@ class ContextBuilder:
             NewsCollector(),
             JarvisCollector(),
             WeatherCollector(),
-            HomeAssistantCollector(),  # ← NOUVEAU : Intégration Home Assistant proactive
+            HomeAssistantCollector(canonical_memory=canonical_memory),
         ]
 
     async def build(self) -> WorldState:

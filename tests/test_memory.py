@@ -184,9 +184,16 @@ def test_agent_build_system_lists_topics_only(tmp_path: Path) -> None:
     class _DummyLLM:
         supports_tools = False
 
-    from jarvis.kernel.settings import settings as _settings
+    from jarvis.kernel.settings import Settings
 
-    agent = Agent(settings=_settings, llm=_DummyLLM(), memory_index=memory_index, topic_store=store)
+    # Le catalogue des topics reste disponible pour le chemin API complet.
+    # Le mode local Holmes l'exclut volontairement pour préserver son budget contexte.
+    agent = Agent(
+        settings=Settings(llm_provider="api"),
+        llm=_DummyLLM(),
+        memory_index=memory_index,
+        topic_store=store,
+    )
     system = agent._build_system()
 
     assert "user_prefs.md" in system

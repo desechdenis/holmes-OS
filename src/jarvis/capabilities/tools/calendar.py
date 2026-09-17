@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from loguru import logger
@@ -20,7 +21,6 @@ _CAL_BASE = "https://www.googleapis.com/calendar/v3"
 try:
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
 
     _HAS_GOOGLE = True
 except ImportError:
@@ -47,21 +47,36 @@ def _load_creds(token_path: Path, credentials_path: Path) -> Credentials:
                 creds = None
 
         if not creds or not creds.valid:
-            if not credentials_path.exists():
-                raise FileNotFoundError(
-                    f"Credentials Google manquants : {credentials_path}. "
-                    "Télécharge-les depuis Google Cloud Console → APIs & Services → Credentials."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), _SCOPES)
-            creds = flow.run_local_server(port=0)
+            # Do not start an InstalledAppFlow here.  This method may run in a
+            # background collector, where a browser prompt every cycle is both
+            # surprising and impossible to complete reliably.
+            raise RuntimeError(
+                "Compte Google Calendar non connecté. "
+                "Ouvre Intégrations, puis connecte Google Calendar."
+            )
 
         token_path.write_text(creds.to_json())
 
     return creds
 
 
+def _format_events_by_calendar(events_by_calendar: list[tuple[str, list[dict]]]) -> list[str]:
+    """Sort events from every visible calendar and retain their source label."""
+    rows: list[tuple[str, str]] = []
+    for calendar_name, events in events_by_calendar:
+        for event in events:
+            start = event.get("start", {}).get("dateTime", event.get("start", {}).get("date", "?"))
+            rows.append(
+                (
+                    start,
+                    f"- {start} · [{calendar_name}] {event.get('summary', '(sans titre)')}",
+                )
+            )
+    return [line for _, line in sorted(rows, key=lambda row: row[0])]
+
+
 class CalendarListTool(Tool):
-    """Liste les prochains événements Google Calendar."""
+    """Liste les prochains événements de tous les calendriers Google visibles."""
 
     name = "list_calendar_events"
     description = (
@@ -89,13 +104,19 @@ class CalendarListTool(Tool):
 
         try:
             creds = await asyncio.to_thread(_load_creds, self._token, self._creds)
+        except RuntimeError as exc:
+            # No OAuth grant yet is expected while the connector is being set
+            # up.  The proactive collector will quietly skip Calendar.
+            return ToolResult(content=str(exc), is_error=True)
         except Exception as e:
             collector.error("JRV-TOL-001", "JRV-TOL-001", cause=e)
             return ToolResult(content=f"Erreur credentials : {e}", is_error=True)
 
-        now_iso = datetime.now(UTC).isoformat()
+        days_ahead = max(1, min(days_ahead, 365))
+        now = datetime.now(UTC)
         params = {
-            "timeMin": now_iso,
+            "timeMin": now.isoformat(),
+            "timeMax": (now + timedelta(days=days_ahead)).isoformat(),
             "maxResults": days_ahead * 5,
             "singleEvents": "true",
             "orderBy": "startTime",
@@ -103,21 +124,47 @@ class CalendarListTool(Tool):
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(
-                    f"{_CAL_BASE}/calendars/primary/events",
+                calendar_list = await client.get(
+                    f"{_CAL_BASE}/users/me/calendarList",
                     headers={"Authorization": f"Bearer {creds.token}"},
-                    params=params,
                 )
-                resp.raise_for_status()
+                calendar_list.raise_for_status()
+                calendars = [
+                    (str(item.get("id", "")), str(item.get("summary", "Agenda")))
+                    for item in calendar_list.json().get("items", [])
+                    if item.get("id")
+                    and not item.get("hidden", False)
+                    and item.get("selected", True)
+                ]
 
-            events = resp.json().get("items", [])
-            if not events:
+                async def fetch_events(
+                    calendar_id: str, calendar_name: str
+                ) -> tuple[str, list[dict]] | None:
+                    try:
+                        response = await client.get(
+                            f"{_CAL_BASE}/calendars/{quote(calendar_id, safe='')}/events",
+                            headers={"Authorization": f"Bearer {creds.token}"},
+                            params=params,
+                        )
+                        response.raise_for_status()
+                        return calendar_name, response.json().get("items", [])
+                    except Exception as exc:  # noqa: BLE001 — isole un agenda inaccessible
+                        collector.warning("JRV-TOL-001", "JRV-TOL-001", cause=exc)
+                        logger.warning(
+                            "Calendar skipped",
+                            calendar=calendar_name,
+                            error=str(exc),
+                        )
+                        return None
+
+                calendar_results = await asyncio.gather(
+                    *(fetch_events(calendar_id, name) for calendar_id, name in calendars)
+                )
+                events_by_calendar = [result for result in calendar_results if result is not None]
+
+            lines = _format_events_by_calendar(list(events_by_calendar))
+            if not lines:
                 return ToolResult(content="Aucun événement prévu.")
-
-            lines = []
-            for e in events:
-                start = e["start"].get("dateTime", e["start"].get("date", "?"))
-                lines.append(f"- {start} : {e.get('summary', '(sans titre)')}")
 
             content = "\n".join(lines)
             logger.debug("Calendar events listed", count=len(lines))
@@ -166,6 +213,8 @@ class CalendarCreateTool(Tool):
 
         try:
             creds = await asyncio.to_thread(_load_creds, self._token, self._creds)
+        except RuntimeError as exc:
+            return ToolResult(content=str(exc), is_error=True)
         except Exception as e:
             collector.error("JRV-TOL-001", "JRV-TOL-001", cause=e)
             return ToolResult(content=f"Erreur credentials : {e}", is_error=True)

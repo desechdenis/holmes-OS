@@ -225,7 +225,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _messaging_gw = await setup_channels(app, container)
 
     logger.info(
-        "Jarvis démarré",
+        "Holmes démarré",
         env=settings.environment,
         llm_provider=settings.llm_provider,
         memory_dir=str(memory_dir),
@@ -236,6 +236,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     container.scheduler.stop()
+    if container.soul_client is not None:
+        await container.soul_client.aclose()
     worker_task.cancel()
     try:
         await worker_task
@@ -250,12 +252,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await telegram.stop()
             except RuntimeError as e:
                 collector.warning("JRV-MSG-001", "Telegram shutdown ignored", cause=e)
-    logger.info("Jarvis arrêté")
+    logger.info("Holmes arrêté")
 
 
 # ── App ──────────────────────────────────────────────────────
 app = FastAPI(
-    title="Jarvis V3",
+    title="HolmesOS",
     description="Assistant personnel intelligent vocal temps réel.",
     version="0.1.0",
     lifespan=lifespan,

@@ -30,6 +30,7 @@ from __future__ import annotations
 from jarvis.kernel.contracts import (
     AutoDreamer,
     CalendarReadTool,
+    CanonicalMemoryStore,
     Channel,
     Collector,
     CrossSessionRecall,
@@ -50,10 +51,13 @@ from jarvis.kernel.contracts import (
     UsageTracker,
 )
 from jarvis.kernel.events import EventBus, bus
+from jarvis.kernel.holmes_memory import CanonicalMemoryEvent, MemorySource
 from jarvis.kernel.settings import Settings, settings
 
 __all__ = [
     "AutoDreamer",
+    "CanonicalMemoryEvent",
+    "CanonicalMemoryStore",
     "CalendarReadTool",
     "Channel",
     "Collector",
@@ -63,6 +67,7 @@ __all__ = [
     "MemoryIndex",
     "MemoryIngest",
     "MemoryStore",
+    "MemorySource",
     "NotificationSink",
     "NotionReadTool",
     "SessionStore",

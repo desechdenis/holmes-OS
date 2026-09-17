@@ -90,6 +90,16 @@ def _voice_system_base(name: str, profile: str = "") -> str:
         "  son PROFIL fourni en contexte : utilise-les DIRECTEMENT. Pour un souvenir précis absent\n"
         '  du profil, appelle memory_search avant de répondre — ne réponds jamais "je ne sais pas"\n'
         "  sans avoir cherché.\n"
+        "- MÉMOIRE CANONIQUE SOUL : pour toute question factuelle sur la maison, l'infrastructure,\n"
+        "  Body, les CT, les projets ou les décisions, appelle d'abord soul_memory_search.\n"
+        "  Ne demande pas de clarification et n'invente pas une réponse tant que cet outil est\n"
+        "  disponible : sa note de référence fait foi.\n"
+        "- AGENDA ET MAILS EN DIRECT : pour une question sur des rendez-vous, un agenda, "
+        "des événements à venir ou des e-mails, appelle d'abord l'outil Google adapté "
+        "(`list_calendar_events` ou `list_emails`) puis réponds avec son résultat. "
+        "La mémoire ne contient que du contexte historique : elle ne remplace jamais "
+        "Google pour ces informations actuelles. Même si un ancien souvenir prétend "
+        "le contraire, l'outil Google connecté fait foi.\n"
         '- Quand tu utilises un outil, annonce-le en 1 phrase courte avant (ex: "Je vérifie l\'imprimante…").\n\n'
         f"Réponds en français sauf si {name} parle en anglais.\n"
     )
@@ -173,6 +183,34 @@ def _make_livekit_tool(jarvis_tool: object) -> lk_llm.RawFunctionTool:
     return lk_llm.function_tool(_execute, raw_schema=raw_schema)
 
 
+def _make_soul_memory_tool(soul_recall: object) -> lk_llm.RawFunctionTool:
+    """Expose Soul directement au process LiveKit, qui ne traverse pas Gateway."""
+    raw_schema = {
+        "name": "soul_memory_search",
+        "description": (
+            "Recherche la mémoire canonique Soul de Holmes. À appeler avant de répondre "
+            "à toute question factuelle sur la maison, Body, les CT, l'infrastructure "
+            "ou les projets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "La question ou les mots-clés à rechercher dans Soul.",
+                }
+            },
+            "required": ["query"],
+        },
+    }
+
+    async def _execute(query: str) -> str:
+        result = await soul_recall.recall(query)  # type: ignore[attr-defined]
+        return result or "Aucune information pertinente n'a été trouvée dans Soul."
+
+    return lk_llm.function_tool(_execute, raw_schema=raw_schema)
+
+
 def _voice_broadcast(event: dict) -> None:
     """Envoie un événement UI via HTTP au serveur FastAPI (localhost)."""
     import json as _json
@@ -183,8 +221,11 @@ def _voice_broadcast(event: dict) -> None:
 
         url = f"http://localhost:{settings.port}/internal/broadcast"
         data = _json.dumps(event).encode()
+        headers = {"Content-Type": "application/json"}
+        if settings.api_auth_enabled:
+            headers["Authorization"] = f"Bearer {settings.api_token.get_secret_value()}"
         req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+            url, data=data, headers=headers, method="POST"
         )
         try:
             urllib.request.urlopen(req, timeout=2)
@@ -243,7 +284,7 @@ class _ProxyMemoryTool:
             return await self._real.execute(**kwargs)  # type: ignore[attr-defined]
 
 
-def _build_voice_tools() -> list:
+def _build_voice_tools() -> tuple[list, dict[str, object]]:
     """Retourne les LiveKit tools en miroir du mode texte (jarvis.app).
 
     Phase C — Étape 1B : re-câblé sur bootstrap.build() partagé. Le process
@@ -284,16 +325,68 @@ def _build_voice_tools() -> list:
     ]
 
     tools = [_make_livekit_tool(t) for t in jarvis_tools]
+    if container.soul_recall is not None:
+        tools.append(_make_soul_memory_tool(container.soul_recall))
     logger.info("Voice tools chargés: %s", [t._info.name for t in tools])
-    return tools
+    # Les mêmes instances servent aussi au pré-routage déterministe des
+    # demandes temporelles. Elles restent donc vivantes avec les closures des
+    # function tools LiveKit, sans recréer un Container à chaque phrase.
+    direct_tools = {str(getattr(t, "name", "")): t for t in jarvis_tools}
+    if container.soul_recall is not None:
+        direct_tools["soul_memory_search"] = container.soul_recall
+    return tools, direct_tools
 
 
 # ─── Agent Jarvis ──────────────────────────────────────────────────────────────
 
 
+def _is_live_calendar_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered
+        for term in (
+            "agenda",
+            "calendrier",
+            "calendar",
+            "rendez-vous",
+            "rendez vous",
+            "rdv",
+            "événement",
+            "evenement",
+            "planning",
+        )
+    )
+
+
+def _is_live_email_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in ("e-mail", "email", "mail", "mails", "boîte"))
+
+
+async def _load_voice_soul_context(soul_recall: object | None, text: str) -> str | None:
+    """Recherche Soul avant le tour vocal, sans dépendre du function calling LLM."""
+    if soul_recall is None or not text.strip():
+        return None
+    try:
+        result = await soul_recall.recall(text)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001 — Soul ne doit pas couper la voix
+        collector.warning("JRV-VOI-001", "JRV-VOI-001", cause=exc)
+        logger.warning("Voice Soul recall failed: %s", exc)
+        return None
+    if not isinstance(result, str) or not result.strip():
+        return None
+    return "## MÉMOIRE CANONIQUE SOUL — recherche en direct\n" + result.strip()
+
+
 class JarvisVoiceAgent(Agent):
-    def __init__(self, instructions: str, tools: list) -> None:
+    def __init__(
+        self, instructions: str, tools: list, direct_tools: dict[str, object] | None = None
+    ) -> None:
         super().__init__(instructions=instructions, tools=tools)
+        direct_tools = direct_tools or {}
+        self._calendar_tool = direct_tools.get("list_calendar_events")
+        self._gmail_tool = direct_tools.get("list_emails")
+        self._soul_recall = direct_tools.get("soul_memory_search")
 
     async def on_enter(self) -> None:
         _name = settings.display_name
@@ -306,6 +399,49 @@ class JarvisVoiceAgent(Agent):
             allow_interruptions=True,
         )
 
+    async def on_user_turn_completed(
+        self, turn_ctx: lk_llm.ChatContext, new_message: lk_llm.ChatMessage
+    ) -> None:
+        """Inject live Google data before the voice LLM can answer from memory.
+
+        Function calling is still exposed for every other capability, but a
+        calendar or mailbox request is inherently time-sensitive.  Giving its
+        result to the model here guarantees it does not mistake a historical
+        Soul note for the current Google state.
+        """
+        text = new_message.text_content or ""
+        context_parts: list[str] = []
+
+        soul_context = await _load_voice_soul_context(self._soul_recall, text)
+        if soul_context:
+            context_parts.append(soul_context)
+
+        if _is_live_calendar_request(text) and self._calendar_tool is not None:
+            result = await self._calendar_tool.execute(days_ahead=7)  # type: ignore[attr-defined]
+            context_parts.append(
+                "## GOOGLE CALENDAR — données en direct\n"
+                + (result.content if not result.is_error else f"Indisponible : {result.content}")
+            )
+
+        if _is_live_email_request(text) and self._gmail_tool is not None:
+            result = await self._gmail_tool.execute(max_results=10, unread_only=True)  # type: ignore[attr-defined]
+            context_parts.append(
+                "## GMAIL — données en direct\n"
+                + (result.content if not result.is_error else f"Indisponible : {result.content}")
+            )
+
+        if context_parts:
+            turn_ctx.add_message(
+                role="developer",
+                content=(
+                    "Réponds à la demande en t'appuyant sur les données ci-dessous. "
+                    "La mémoire Soul fait foi pour les faits durables ; Google fait foi pour "
+                    "l'agenda et les e-mails actuels. La recherche Soul a déjà été effectuée : "
+                    "ne rappelle pas soul_memory_search pour cette question.\n\n"
+                    + "\n\n".join(context_parts)
+                ),
+            )
+
 
 # ─── Prewarm — chargé une fois au démarrage du process ─────────────────────────
 
@@ -313,7 +449,9 @@ class JarvisVoiceAgent(Agent):
 def prewarm(proc: object) -> None:
     """Pré-charge les skills, outils et le modèle VAD avant l'arrivée d'un job."""
     proc.userdata["instructions"] = _build_voice_instructions()  # type: ignore[attr-defined]
-    proc.userdata["tools"] = _build_voice_tools()  # type: ignore[attr-defined]
+    tools, direct_tools = _build_voice_tools()
+    proc.userdata["tools"] = tools  # type: ignore[attr-defined]
+    proc.userdata["direct_tools"] = direct_tools  # type: ignore[attr-defined]
     # Le modèle ONNX silero met ~300-800ms à charger ; le faire ici évite de payer
     # ce coût au premier clic micro.
     proc.userdata["vad"] = silero.VAD.load(  # type: ignore[attr-defined]
@@ -516,7 +654,10 @@ async def entrypoint(ctx: object) -> None:
     # instructions de base sont préchauffées une fois, mais la date/heure doit être
     # fraîche et le profil disponible directement (pas via memory_search).
     instructions = _dynamic_context() + "\n\n" + instructions
-    tools = userdata.get("tools") or _build_voice_tools()
+    tools = userdata.get("tools")
+    direct_tools = userdata.get("direct_tools")
+    if not tools:
+        tools, direct_tools = _build_voice_tools()
     vad = userdata.get("vad") or silero.VAD.load(
         min_speech_duration=0.05,
         min_silence_duration=0.4,
@@ -536,7 +677,11 @@ async def entrypoint(ctx: object) -> None:
         turn_handling={"interruption": {"mode": "vad"}},
     )
 
-    agent = JarvisVoiceAgent(instructions=instructions, tools=tools)
+    agent = JarvisVoiceAgent(
+        instructions=instructions,
+        tools=tools,
+        direct_tools=direct_tools,
+    )
 
     await session.start(
         room=ctx.room,

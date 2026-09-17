@@ -16,7 +16,6 @@ from pathlib import Path
 import httpx
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from loguru import logger
 
 from jarvis.engine.proactive.collectors.base import CollectorBase
@@ -71,7 +70,7 @@ def _extract_text_body(payload: dict) -> str:
     return ""
 
 
-def _load_gmail_creds(credentials_path: Path, token_path: Path):  # noqa: ANN202
+def _load_gmail_creds(token_path: Path):  # noqa: ANN202
 
     creds = None
     if token_path.exists():
@@ -81,10 +80,11 @@ def _load_gmail_creds(credentials_path: Path, token_path: Path):  # noqa: ANN202
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            if not credentials_path.exists():
-                raise FileNotFoundError(f"Credentials Google manquants : {credentials_path}")
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), _SCOPES)
-            creds = flow.run_local_server(port=0)
+            # A collector runs unattended.  It must never start the legacy
+            # local OAuth server (which opens a browser) while Holmes is
+            # gathering proactive context.  Connection is an explicit action
+            # in the Integrations screen.
+            raise RuntimeError("Compte Gmail non connecté")
         token_path.write_text(creds.to_json())
 
     return creds
@@ -98,14 +98,12 @@ class EmailCollector(CollectorBase):
             logger.debug("EmailCollector ignoré — mode local")
             return []
 
-        creds_path = Path(settings.google_credentials_path)
         token_path = Path(settings.google_token_path).parent / "google_gmail_token.json"
 
         try:
-            creds = await asyncio.to_thread(_load_gmail_creds, creds_path, token_path)
-        except FileNotFoundError as e:
-            collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=e)
-            logger.warning(f"EmailCollector: {e}")
+            creds = await asyncio.to_thread(_load_gmail_creds, token_path)
+        except RuntimeError as exc:
+            logger.debug("EmailCollector ignoré — compte Gmail non connecté", error=str(exc))
             return []
 
         return await self._fetch_messages(creds.token)

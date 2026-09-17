@@ -12,7 +12,9 @@ from pathlib import Path
 from loguru import logger
 
 from jarvis.kernel.connectivity import is_offline_mode
+from jarvis.kernel.contracts import CanonicalMemoryStore
 from jarvis.kernel.error_collector import collector  # jrv: autofix
+from jarvis.kernel.holmes_memory import CanonicalMemoryEvent, MemorySource
 from jarvis.kernel.paths import PROMPTS_DIR  # noqa: E402
 from jarvis.providers.llm.base import LLMProvider
 from jarvis.providers.memory.index import MemoryIndex
@@ -37,6 +39,7 @@ class ConsolidationAgent:
         memory_index: MemoryIndex,
         topic_store: TopicStore,
         memory_ingest: MemoryIngest | None = None,
+        canonical_memory: CanonicalMemoryStore | None = None,
         user_firstname: str = "Barth",
         assistant_name: str = "Jarvis",
     ) -> None:
@@ -52,6 +55,7 @@ class ConsolidationAgent:
         # PHASE 3 — Q3=a : ingestion en parallèle dans le Kernel SQLite.
         # Doublon temporaire ; topics/*.md restent écrits comme avant.
         self._ingest = memory_ingest
+        self._canonical_memory = canonical_memory
 
     def fire(self, user_message: str, assistant_message: str) -> None:
         """Lance la consolidation en fire-and-forget. Ne bloque jamais."""
@@ -84,7 +88,7 @@ class ConsolidationAgent:
             context="memory",
         )
 
-        self._apply(str(response))
+        await self._apply(str(response))
 
         # PHASE 3 — Ingestion parallèle dans le Kernel SQLite (best-effort, ne bloque pas).
         if self._ingest is not None:
@@ -98,7 +102,7 @@ class ConsolidationAgent:
                 collector.warning("JRV-MEM-001", "JRV-MEM-001", cause=exc)
                 logger.warning("Consolidation: ingest Kernel error", error=str(exc))
 
-    def _apply(self, raw: str) -> None:
+    async def _apply(self, raw: str) -> None:
         # Strip markdown code fences (```json ... ``` or ``` ... ```)
         fence_match = _CODE_FENCE_RE.search(raw)
         candidate = fence_match.group(1) if fence_match else raw
@@ -139,6 +143,41 @@ class ConsolidationAgent:
                 description=pointer,
             )
             logger.info("Consolidated", file=filename, key=key)
+            await self._write_canonical_event(
+                filename=filename,
+                section=section,
+                key=key,
+                pointer=pointer,
+                content=content,
+            )
+
+    async def _write_canonical_event(
+        self,
+        *,
+        filename: str,
+        section: str,
+        key: str,
+        pointer: str,
+        content: str,
+    ) -> None:
+        """Réplique vers Soul uniquement une mémoire déjà consolidée."""
+        if self._canonical_memory is None:
+            return
+        try:
+            await self._canonical_memory.append_event(
+                CanonicalMemoryEvent(
+                    source=MemorySource.CONVERSATION,
+                    content=(
+                        f"Mémoire durable consolidée : {pointer}\n\n"
+                        f"## Contenu canonique\n\n{content.strip()}"
+                    ),
+                    metadata={"file": filename, "section": section, "key": key},
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Soul ne doit jamais empêcher la consolidation locale déjà validée.
+            collector.warning("JRV-MEM-001", "JRV-MEM-001", cause=exc)
+            logger.warning("Consolidation: canonical Soul write failed", error=str(exc))
 
 
 class CrossSessionRecall:

@@ -68,10 +68,30 @@ case "${1:-}" in
       sleep 0.3
 
       _pids=()
+      _cleaning=0
       _cleanup() {
+        [ "$_cleaning" -eq 1 ] && return
+        _cleaning=1
+        trap - INT TERM EXIT
         printf "\n  ${GY}arrêt en cours...${R}\n"
-        for p in "${_pids[@]}"; do kill "$p" 2>/dev/null; done
-        wait 2>/dev/null
+        # Le dernier PID est le tail des logs : on le coupe en premier pour ne
+        # pas afficher les KeyboardInterrupt normaux des workers au shutdown.
+        for ((i=${#_pids[@]}-1; i>=0; i--)); do
+          kill "${_pids[$i]}" 2>/dev/null || true
+        done
+        # Laisse aux services le temps de fermer leurs clients et sous-processus.
+        for _n in {1..30}; do
+          _alive=0
+          for p in "${_pids[@]}"; do
+            kill -0 "$p" 2>/dev/null && _alive=1
+          done
+          [ "$_alive" -eq 0 ] && break
+          sleep 0.1
+        done
+        for p in "${_pids[@]}"; do
+          kill -9 "$p" 2>/dev/null || true
+        done
+        wait 2>/dev/null || true
         printf "  ${TL}●${R}  ${GY}Holmes arrêté${R}\n\n"
         exit 0
       }
@@ -124,7 +144,7 @@ case "${1:-}" in
 
       # 2) FastAPI
       _row_wait "API" "démarrage..."
-      uv run python -m jarvis.app > "$API_LOG" 2>&1 &
+      HOLMES_API_RELOAD=false uv run python -m jarvis.app > "$API_LOG" 2>&1 &
       _pids+=($!)
       if _wait_http "http://127.0.0.1:8000/health" 90; then
         printf "$CLEAR_LINE"; _row_ok "API" "http://localhost:8000"

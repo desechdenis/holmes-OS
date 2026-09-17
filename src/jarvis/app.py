@@ -18,6 +18,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -345,11 +346,18 @@ def main() -> None:
     - `python -m jarvis.app` (entry point cible, B.4)
     - `python main.py` (shim racine pendant la migration)
     """
+    reload_override = os.getenv("HOLMES_API_RELOAD", "").strip().lower()
+    reload_enabled = settings.environment == "development" and reload_override not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
     uvicorn.run(
         "jarvis.app:app",
         host=settings.host,
         port=settings.port,
-        reload=settings.environment == "development",
+        reload=reload_enabled,
         reload_dirs=["src/jarvis", "prompts", "config"],
         log_level="warning",
     )

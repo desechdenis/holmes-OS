@@ -196,7 +196,7 @@ case "${1:-}" in
     ;;
   doctor)
     uv run python3 - <<'PYEOF'
-import sys, os, subprocess, urllib.request, urllib.error
+import sys, os, ssl, subprocess, urllib.request, urllib.error
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -221,16 +221,26 @@ R  = "\033[0m";  B  = "\033[1m";  D  = "\033[2m"
 CY = "\033[96m"; GR = "\033[32m"; YL = "\033[33m"; RD = "\033[31m"
 DOT = {"ok": GR+"●"+R, "warning": YL+"●"+R, "error": RD+"●"+R}
 
+def local_base_url():
+    scheme = "https" if e("TLS_ENABLED").lower() in {"1", "true", "yes", "on"} else "http"
+    return f"{scheme}://localhost:{e('PORT') or '8000'}"
+
+def api_headers():
+    token = e("API_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
 def http_get(url, headers=None, timeout=6):
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    context = ssl._create_unverified_context() if url.startswith("https://localhost:") else None
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as r:
         return r.status
 
 def check_fastapi():
     port = e("PORT") or "8000"
     try:
-        s = http_get(f"http://localhost:{port}/health")
-        return ("ok", f"En ligne · :{port}") if s < 400 else ("error", f"HTTP {s}")
+        s = http_get(local_base_url() + "/health")
+        scheme = "HTTPS" if local_base_url().startswith("https://") else "HTTP"
+        return ("ok", f"En ligne · {scheme} :{port}") if s < 400 else ("error", f"HTTP {s}")
     except: return ("warning", f"Serveur eteint · port {port}")
 
 def check_anthropic():
@@ -291,9 +301,8 @@ def check_skills():
     return ("ok", f"{n} installes")
 
 def check_proactive():
-    port = e("PORT") or "8000"
     try:
-        s = http_get(f"http://localhost:{port}/api/proactive/status")
+        s = http_get(local_base_url() + "/api/proactive/status", api_headers())
         return ("ok", "Actif") if s == 200 else ("warning", "Serveur eteint")
     except: return ("warning", "Serveur eteint")
 
@@ -312,7 +321,7 @@ CHECKS = [
 
 ICONS = {"ok": GR+"●"+R, "warning": YL+"●"+R, "error": RD+"✗"+R}
 
-TITLE = "J·A·R·V·I·S  ─  diagnostic système"
+TITLE = "H·O·L·M·E·S  ─  diagnostic système"
 IW    = len(TITLE) + 8
 
 # Spinner

@@ -75,10 +75,13 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 - La liste « Tâches » est canonique dans Soul en lecture/écriture. Le dashboard,
   le moteur proactif, les briefings et la voix partagent le même registre ; Notion
   reste uniquement un repli lorsque Soul n'est pas configuré.
+- Les commandes de tâches sont routées de manière déterministe dans le chat et la
+  voix. Holmes ne confirme plus une mutation tant que Soul n'a pas répondu avec
+  succès ; les formulations courtes comme « ajoute aller dormir » sont acceptées.
 - Mission Control permet désormais de créer, inspecter, autoriser, refuser, arrêter,
   relancer et reprendre une mission depuis le tableau. Une mission interrompue au
   redémarrage est placée en pause sûre et attend une reprise humaine explicite.
-- Validation : 880 tests réussis, 1 ignoré.
+- Validation : 889 tests réussis, 1 ignoré.
 
 ## Restant avant publication
 

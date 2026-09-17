@@ -85,7 +85,12 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
   redémarrage est placée en pause sûre et attend une reprise humaine explicite.
 - Une initiative conserve l'identifiant de la mission qu'elle lance et passe
   automatiquement à `done` ou `failed` à la réception de `MissionCompleted`.
-- Validation : 894 tests réussis, 1 ignoré.
+- La provenance proactive utilise désormais les identifiants réels des collecteurs
+  (`gmail`, `google_calendar`, `soul_tasks`, etc.). Toute source proposée par le LLM
+  est validée contre la collecte et remplacée par une attribution déterministe si besoin.
+- L'audit proactif est persisté en JSONL et restauré au redémarrage, au lieu de
+  disparaître avec la mémoire du processus.
+- Validation : 895 tests réussis, 1 ignoré.
 
 ## Restant avant publication
 
@@ -95,5 +100,3 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 4. Terminer le renommage externe Jarvis → Holmes sans casser le namespace Python.
 5. Reporter l'audio mobile à la phase finale : HA Assist pour le micro et le routage,
    Holmes pour le raisonnement, puis TTS Home Assistant vers la bonne cible.
-6. Remplacer l'inférence textuelle des sources d'initiative par une provenance
-   structurée issue des collecteurs, puis persister l'audit proactif sur disque.

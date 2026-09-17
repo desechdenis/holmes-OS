@@ -509,6 +509,7 @@ def build(
         ),
         store=initiative_store,
         interval_minutes=30,
+        audit_path=memory_dir / "proactive_audit.jsonl",
     )
 
     # ── 15. Engine L2 — Scheduler ──────────────────────────────────────────

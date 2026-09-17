@@ -201,7 +201,8 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans explication :
       "to_email": "email@dest.com ou null",
       "email_subject": "Sujet court ou null",
       "thread_id": "thread_id ou null",
-      "mission_description": "60 chars max ou null"
+      "mission_description": "60 chars max ou null",
+      "sources": ["noms exacts pris dans SOURCES DISPONIBLES"]
     }
   ]
 }
@@ -277,6 +278,7 @@ class InitiativeGenerator:
             response = "".join(chunks)
 
         initiatives = self._parse_initiatives(response)
+        self._attach_structured_sources(initiatives, state)
 
         # Générer les brouillons séparément pour ne pas saturer le JSON principal
         for init in initiatives:
@@ -284,6 +286,27 @@ class InitiativeGenerator:
                 init.draft_content = await self._generate_draft(init)
 
         return initiatives
+
+    @staticmethod
+    def _attach_structured_sources(initiatives: list[Initiative], state: WorldState) -> None:
+        """Valide l'attribution LLM contre les collecteurs, avec repli déterministe."""
+        allowed = set(state.source_names)
+        for initiative in initiatives:
+            initiative.sources = [source for source in initiative.sources if source in allowed]
+            if initiative.sources:
+                continue
+            haystack = " ".join(
+                (initiative.title, initiative.context, initiative.reasoning, initiative.action)
+            ).casefold()
+            words = set(re.findall(r"\w+", haystack))
+            matched: set[str] = set()
+            for item in state.collection.items:
+                item_words = set(
+                    re.findall(r"\w+", f"{item.title} {item.summary}".casefold())
+                )
+                if len(words & item_words) >= 2:
+                    matched.add(item.source)
+            initiative.sources = sorted(matched) or state.source_names
 
     async def _generate_draft(self, init: Initiative) -> str | None:
         """Génère le brouillon email pour une initiative draft_response."""
@@ -374,6 +397,7 @@ class InitiativeGenerator:
                 execution_mode=ExecutionMode(item.get("execution_mode", initiative.execution_mode)),
                 draft_content=item.get("draft_content") or None,
                 mission_description=item.get("mission_description") or None,
+                sources=list(initiative.sources),
                 created_at=initiative.created_at,
             )
         except Exception as e:
@@ -397,6 +421,12 @@ class InitiativeGenerator:
 
             for item in data.get("initiatives", [])[:MAX_INITIATIVES]:
                 try:
+                    raw_sources = item.get("sources", [])
+                    sources = (
+                        [str(source) for source in raw_sources if source]
+                        if isinstance(raw_sources, list)
+                        else []
+                    )
                     init = Initiative(
                         id=f"init_{uuid.uuid4().hex[:8]}",
                         type=InitiativeType(item.get("type", "info")),
@@ -408,6 +438,7 @@ class InitiativeGenerator:
                         execution_mode=ExecutionMode(item.get("execution_mode", "notify")),
                         draft_content=None,  # généré séparément
                         mission_description=(item.get("mission_description") or None),
+                        sources=sources,
                     )
                     # Stocker les champs email pour la génération du brouillon
                     init._to_email = item.get("to_email") or ""  # type: ignore[attr-defined]

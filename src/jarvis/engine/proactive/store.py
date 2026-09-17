@@ -77,6 +77,7 @@ class InitiativeStore:
     def _parse_initiative(self, data: dict) -> Initiative:
         # PHASE 6 — nouveaux champs avec .get(...) defaults pour compat JSONL legacy.
         deadline_str = data.get("deadline")
+        raw_sources = data.get("sources", [])
         return Initiative(
             id=data["id"],
             type=InitiativeType(data["type"]),
@@ -89,6 +90,11 @@ class InitiativeStore:
             draft_content=data.get("draft_content"),
             mission_description=data.get("mission_description"),
             project_id=data.get("project_id"),
+            sources=(
+                [str(source) for source in raw_sources if source]
+                if isinstance(raw_sources, list)
+                else []
+            ),
             status=data.get("status", "pending"),
             created_at=datetime.fromisoformat(data["created_at"]),
             autonomy_level=AutonomyLevel(
@@ -158,6 +164,7 @@ class InitiativeStore:
                         "draft_content": initiative.draft_content,
                         "mission_description": initiative.mission_description,
                         "project_id": initiative.project_id,
+                        "sources": initiative.sources,
                         "status": initiative.status,
                         "created_at": initiative.created_at.isoformat(),
                         # PHASE 6 — champs gouvernance §10.1

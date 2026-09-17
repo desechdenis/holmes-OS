@@ -155,7 +155,7 @@ async def test_concurrency_blocks_overlap(tmp_path: Path) -> None:
 # ── Test 4 : événement proactif audité ────────────────────────────────────────
 
 
-def test_proactive_audit_event() -> None:
+def test_proactive_audit_event(tmp_path: Path) -> None:
     """ProactiveEngine._dispatch doit enregistrer un ProactiveAuditEvent consultable."""
     from jarvis.engine.background.notifications import NotificationQueue
     from jarvis.engine.proactive.engine import ProactiveEngine
@@ -179,6 +179,7 @@ def test_proactive_audit_event() -> None:
         generator=InitiativeGenerator(llm=MagicMock()),
         store=InitiativeStore(),
         interval_minutes=30,
+        audit_path=tmp_path / "proactive_audit.jsonl",
     )
 
     initiative = Initiative(
@@ -190,6 +191,7 @@ def test_proactive_audit_event() -> None:
         action="Répondre à l'email",
         priority=Priority.HIGH,
         execution_mode=ExecutionMode.NOTIFY,
+        sources=["gmail"],
     )
 
     engine._dispatch(initiative)
@@ -202,7 +204,18 @@ def test_proactive_audit_event() -> None:
     assert ev.decision == "notify"
     assert ev.event_id.startswith("aud_")
     assert ev.decided_at != ""
-    assert "email" in ev.sources  # "email" doit être inféré depuis le contexte
+    assert ev.sources == ["gmail"]
+
+    # Un nouveau moteur restaure le même audit après redémarrage.
+    restored = ProactiveEngine(
+        notification_queue=_Queue(),
+        broadcast_event=broadcast_events.append,
+        builder=ContextBuilder(calendar_tool=MagicMock(), notion_tool=MagicMock()),
+        generator=InitiativeGenerator(llm=MagicMock()),
+        store=InitiativeStore(),
+        audit_path=tmp_path / "proactive_audit.jsonl",
+    )
+    assert restored.audit_events()[0] == ev
 
     # Vérification du broadcast
     audit_broadcasts = [e for e in broadcast_events if e.get("type") == "proactive_audit"]

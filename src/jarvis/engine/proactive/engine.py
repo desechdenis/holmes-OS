@@ -11,11 +11,13 @@ Dispatche les initiatives selon leur mode d'exécution.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from loguru import logger
 
@@ -25,6 +27,7 @@ from jarvis.engine.proactive.initiative_generator import InitiativeGenerator
 from jarvis.engine.proactive.schemas import ExecutionMode, Initiative, Priority
 from jarvis.engine.proactive.store import InitiativeStore
 from jarvis.kernel.error_collector import collector  # jrv: autofix
+from jarvis.kernel.file_lock import exclusive_file_lock
 from jarvis.kernel.settings import settings
 
 _AUDIT_MAXLEN = 200
@@ -46,20 +49,6 @@ class ProactiveAuditEvent:
     decided_at: str  # ISO UTC
 
 
-def _extract_sources(initiative: Initiative) -> list[str]:
-    """Infère les sources d'information utilisées pour cette initiative."""
-    text = f"{initiative.context} {initiative.reasoning}".lower()
-    keywords: dict[str, list[str]] = {
-        "email": ["email", "mail", "inbox"],
-        "calendrier": ["calendar", "agenda", "event", "rdv"],
-        "notion": ["notion", "tâche", "task"],
-        "météo": ["météo", "weather", "pluie", "soleil"],
-        "mémoire": ["memory", "mémoire", "session"],
-    }
-    found = [k for k, words in keywords.items() if any(w in text for w in words)]
-    return found or ["proactive_context"]
-
-
 class ProactiveEngine:
     """Phase C : `builder`, `generator`, `store` injectés (auparavant
     `ContextBuilder()`, `InitiativeGenerator()`, `InitiativeStore()`
@@ -76,6 +65,7 @@ class ProactiveEngine:
         generator: InitiativeGenerator,
         store: InitiativeStore,
         interval_minutes: int = 30,
+        audit_path: Path | None = None,
     ) -> None:
         self._notifications = notification_queue
         self._broadcast_event = broadcast_event
@@ -83,11 +73,38 @@ class ProactiveEngine:
         self._builder = builder
         self._generator = generator
         self._store = store
+        self._audit_path = audit_path
         self._running = False
         self._last_run: datetime | None = None
         self._last_user_activity: datetime | None = None
         self._cycle_lock = asyncio.Lock()  # un seul cycle à la fois
         self._audit_log: deque[ProactiveAuditEvent] = deque(maxlen=_AUDIT_MAXLEN)
+        self._load_audit()
+
+    def _load_audit(self) -> None:
+        if self._audit_path is None or not self._audit_path.exists():
+            return
+        try:
+            rows = self._audit_path.read_text(encoding="utf-8").splitlines()[-_AUDIT_MAXLEN:]
+            for row in rows:
+                payload = json.loads(row)
+                self._audit_log.append(ProactiveAuditEvent(**payload))
+        except Exception as exc:  # noqa: BLE001 — audit corrompu ne bloque pas Holmes
+            collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=exc)
+            logger.warning("Proactive audit load failed", error=str(exc))
+
+    def _persist_audit(self, audit: ProactiveAuditEvent) -> None:
+        if self._audit_path is None:
+            return
+        try:
+            self._audit_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path = self._audit_path.with_suffix(self._audit_path.suffix + ".lock")
+            with exclusive_file_lock(lock_path):
+                with self._audit_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(asdict(audit), ensure_ascii=False) + "\n")
+        except Exception as exc:  # noqa: BLE001 — l'initiative reste prioritaire
+            collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=exc)
+            logger.warning("Proactive audit write failed", error=str(exc))
 
     def signal_user_activity(self) -> None:
         """Appelé par le WebSocket à chaque message entrant."""
@@ -203,10 +220,11 @@ class ProactiveEngine:
             initiative_title=initiative.title,
             decision=str(initiative.execution_mode),
             reasoning=(initiative.reasoning or initiative.action)[:200],
-            sources=_extract_sources(initiative),
+            sources=list(initiative.sources) or ["proactive_context"],
             decided_at=datetime.now(UTC).isoformat(),
         )
         self._audit_log.append(audit)
+        self._persist_audit(audit)
         self._broadcast_event({"type": "proactive_audit", "event": asdict(audit)})
         logger.info(
             f"ProactiveEngine AUDIT [{audit.decision}] {audit.initiative_title!r} "

@@ -44,6 +44,11 @@ class WorldState:
     tensions: list[str] = field(default_factory=list)
     opportunities: list[str] = field(default_factory=list)
 
+    @property
+    def source_names(self) -> list[str]:
+        """Provenance structurée réellement observée par les collecteurs."""
+        return sorted({item.source for item in self.collection.items if item.source})
+
     def to_prompt_context(self) -> str:
         """Formate l'état du monde pour injection dans un prompt LLM."""
         sections = []
@@ -63,6 +68,8 @@ class WorldState:
         if self.cross_domain_connections:
             connections_text = "\n".join(f"- {c}" for c in self.cross_domain_connections)
             sections.append(f"## CONNEXIONS DÉTECTÉES\n{connections_text}")
+        if self.source_names:
+            sections.append("## SOURCES DISPONIBLES\n" + ", ".join(self.source_names))
 
         return "\n\n".join(sections)
 

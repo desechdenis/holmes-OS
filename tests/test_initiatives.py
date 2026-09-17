@@ -91,6 +91,7 @@ def _write_initiative(store_dir: Path, initiative: Initiative, date_str: str) ->
                     "draft_content": initiative.draft_content,
                     "mission_description": initiative.mission_description,
                     "project_id": initiative.project_id,
+                    "sources": initiative.sources,
                     "status": initiative.status,
                     "created_at": initiative.created_at.isoformat(),
                 }
@@ -111,6 +112,39 @@ def make_store(tmp_path: Path) -> InitiativeStore:
     _orig = _store_mod.INITIATIVES_DIR
     _store_mod.INITIATIVES_DIR = tmp_path
     return store
+
+
+def test_generator_keeps_only_sources_observed_by_collectors() -> None:
+    from jarvis.engine.proactive.context_builder import WorldState
+    from jarvis.engine.proactive.initiative_generator import InitiativeGenerator
+    from jarvis.engine.proactive.schemas import CollectionResult, ContextItem, ItemType
+
+    state = WorldState(
+        collected_at=datetime.now(),
+        collection=CollectionResult(
+            items=[
+                ContextItem(
+                    type=ItemType.TASK,
+                    title="Sortir les poubelles",
+                    summary="Sortir les poubelles ce soir",
+                    raw="Sortir les poubelles ce soir",
+                    source="soul_tasks",
+                    timestamp=datetime.now(),
+                    priority=Priority.MEDIUM,
+                )
+            ],
+            collected_at=datetime.now(),
+        ),
+    )
+    initiative = _make_initiative(
+        InitiativeType.REMINDER,
+        title="Sortir les poubelles ce soir",
+    )
+    initiative.sources = ["source_inventée"]
+
+    InitiativeGenerator._attach_structured_sources([initiative], state)
+
+    assert initiative.sources == ["soul_tasks"]
 
 
 # ── Tests : Store multi-jours ─────────────────────────────────────────────────

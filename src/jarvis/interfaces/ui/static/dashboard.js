@@ -145,7 +145,7 @@
     const shown = inits.slice(0, 5);
     const highCount = inits.filter(i => i.priority === "high").length;
     const tasks = (tasksRaw.tasks || tasksRaw || [])
-      .map(t => ({ id: t.id, label: t.title || t.label || t.text || "", done: !!(t.done || t.checked), src: t.source || "NOTION" }))
+      .map(t => ({ id: t.id, label: t.title || t.label || t.text || "", done: !!(t.done || t.checked), src: t.source || "SOUL" }))
       .filter(t => t.label);
 
     const wrap = el("div", { style: { display: "flex", flexDirection: "column", gap: "44px" } });
@@ -928,7 +928,7 @@
         id: t.id,
         label: t.title || t.label || t.text || "",
         done: !!(t.done || t.checked),
-        src: t.source || "NOTION",
+        src: t.source || "SOUL",
       })).filter(t => t.label);
     } catch (_) {}
 
@@ -962,7 +962,7 @@
         if (!text) return;
         try {
           const created = await J.api.post("/api/tasks", { text });
-          const t = { id: created.id, label: created.text, done: false, src: "NOTION" };
+          const t = { id: created.id, label: created.text, done: false, src: "SOUL" };
           const empty = list.querySelector(".j-empty");
           if (empty) empty.remove();
           list.insertBefore(buildTaskRow(t, list), addBar);
@@ -979,7 +979,7 @@
 
     const done = tasks.filter(t => t.done).length;
     const wrap = el("div");
-    wrap.appendChild(ghostSec("Tâches du jour", "Notion", null, list));
+    wrap.appendChild(ghostSec("Tâches du jour", "Soul · lecture/écriture", null, list));
 
     const page = pageWrapper(
       "taches",

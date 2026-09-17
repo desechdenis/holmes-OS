@@ -3,8 +3,8 @@
 # See the LICENSE file or <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 """
-TaskCollector — récupère les tâches Notion non cochées.
-Réutilise le tool notion existant.
+TaskCollector — récupère les tâches canoniques non cochées.
+Réutilise l'outil injecté (Soul quand configuré, Notion en repli).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class TaskCollector(CollectorBase):
                     title=line,
                     summary=line,
                     raw=line,
-                    source="notion",
+                    source=getattr(self._notion_tool, "name", "tasks"),
                     timestamp=now,
                     priority=Priority.MEDIUM,
                 )

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -420,6 +421,27 @@ class CanonicalMemoryStore(Protocol):
     """
 
     async def append_event(self, event: CanonicalMemoryEvent) -> str: ...
+
+
+@dataclass(frozen=True)
+class CanonicalTask:
+    """Tâche canonique partagée entre Soul, les interfaces et la voix."""
+
+    id: str
+    text: str
+    done: bool = False
+
+
+@runtime_checkable
+class CanonicalTaskStore(Protocol):
+    """Registre de tâches persistant, indépendant du transport Soul."""
+
+    async def list_tasks(self) -> list[CanonicalTask]: ...
+    async def create_task(self, text: str) -> CanonicalTask: ...
+    async def update_task(
+        self, task_id: str, *, text: str | None = ..., done: bool | None = ...
+    ) -> CanonicalTask: ...
+    async def delete_task(self, task_id: str) -> bool: ...
 
 
 @runtime_checkable

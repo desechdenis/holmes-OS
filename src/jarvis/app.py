@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.fts_index = container.fts_index
     app.state.user_model = container.user_model
     app.state.memory_kernel = container.memory_kernel
+    app.state.canonical_tasks = container.canonical_tasks
     app.state.memory_mirror = container.memory_mirror
     app.state.skill_synthesizer = container.skill_synthesizer
     app.state.skill_lab = container.skill_lab

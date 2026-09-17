@@ -100,6 +100,9 @@ def _voice_system_base(name: str, profile: str = "") -> str:
         "La mémoire ne contient que du contexte historique : elle ne remplace jamais "
         "Google pour ces informations actuelles. Même si un ancien souvenir prétend "
         "le contraire, l'outil Google connecté fait foi.\n"
+        "- TÂCHES : la liste canonique est dans Soul. Pour lire, ajouter, terminer, renommer "
+        "ou supprimer une tâche, appelle `soul_tasks`. Ne parle pas de Motion ou Notion et "
+        "ne prétends jamais que la liste est en lecture seule tant que cet outil est disponible.\n"
         '- Quand tu utilises un outil, annonce-le en 1 phrase courte avant (ex: "Je vérifie l\'imprimante…").\n\n'
         f"Réponds en français sauf si {name} parle en anglais.\n"
     )

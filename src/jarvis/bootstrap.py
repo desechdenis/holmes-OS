@@ -55,6 +55,7 @@ from jarvis.capabilities.tools.show_view import ShowViewTool
 from jarvis.capabilities.tools.skills import SkillCreateTool, SkillImproveTool, SkillListTool
 from jarvis.capabilities.tools.spotify import SpotifyTool
 from jarvis.capabilities.tools.subagent import ScriptRPCTool, SpawnSubagentTool
+from jarvis.capabilities.tools.tasks import SoulTasksTool
 from jarvis.capabilities.tools.vision import VisionTool
 from jarvis.capabilities.tools.weather import WeatherTool
 from jarvis.engine.agent import Agent
@@ -111,7 +112,7 @@ from jarvis.providers.memory.kernel import MemoryKernel
 from jarvis.providers.memory.mirror import MemoryMirror
 from jarvis.providers.memory.search import FTSIndex, VectorIndex
 from jarvis.providers.memory.sessions import SessionStore
-from jarvis.providers.memory.soul import SoulMCPClient, SoulMemoryStore, SoulRecall
+from jarvis.providers.memory.soul import SoulMCPClient, SoulMemoryStore, SoulRecall, SoulTaskStore
 from jarvis.providers.memory.topics import TopicStore
 from jarvis.providers.memory.user_model import UserModel
 
@@ -141,6 +142,7 @@ class Container:
     user_model: UserModel
     soul_client: SoulMCPClient | None
     canonical_memory: SoulMemoryStore | None
+    canonical_tasks: SoulTaskStore | None
     soul_recall: SoulRecall | None
     home_state_reader: HomeAssistantStateReader | None
 
@@ -244,6 +246,9 @@ def build(
     soul_recall = (
         SoulRecall(soul_client, project=settings.soul_project or None) if soul_client else None
     )
+    canonical_tasks = (
+        SoulTaskStore(soul_client, project=settings.soul_project or None) if soul_client else None
+    )
     ha_token = settings.home_assistant_token.get_secret_value()
     home_state_reader = (
         HomeAssistantStateReader(settings.home_assistant_url, ha_token) if ha_token else None
@@ -310,6 +315,9 @@ def build(
         credentials_path=_google_creds, token_path=_calendar_token
     )
     notion_tasks_tool = NotionTasksTool()
+    tasks_tool = (
+        SoulTasksTool(canonical_tasks) if canonical_tasks is not None else notion_tasks_tool
+    )
 
     tool_registry = ToolRegistry()
     tool_registry.register(
@@ -322,7 +330,7 @@ def build(
         ExecuteCLITool(),
         calendar_list_tool,
         CalendarCreateTool(credentials_path=_google_creds, token_path=_calendar_token),
-        notion_tasks_tool,
+        tasks_tool,
         MemoryTopicWriteTool(vector_index=vector_index),
         MemoryLoadTopicTool(topic_store=topic_store),
         MemorySearchTool(vector_index=vector_index),
@@ -489,7 +497,7 @@ def build(
         broadcast_event=proactive_queue.broadcast_event,
         builder=ContextBuilder(
             calendar_tool=calendar_list_tool,
-            notion_tool=notion_tasks_tool,
+            notion_tool=tasks_tool,
             canonical_memory=canonical_memory,
         ),
         generator=InitiativeGenerator(
@@ -508,7 +516,7 @@ def build(
         auto_dream=auto_dream,
         calendar_tool=calendar_list_tool,
         settings=settings,
-        notion_tool=notion_tasks_tool,
+        notion_tool=tasks_tool,
         skill_lab=skill_lab,
         curator=curator,
     )
@@ -562,6 +570,7 @@ def build(
         user_model=user_model,
         soul_client=soul_client,
         canonical_memory=canonical_memory,
+        canonical_tasks=canonical_tasks,
         soul_recall=soul_recall,
         home_state_reader=home_state_reader,
         # Providers L1 — LLM

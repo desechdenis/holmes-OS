@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -19,9 +19,17 @@ from jarvis.kernel.settings import settings
 
 router = APIRouter(prefix="/api")
 
+# Compatibilité pour les consommateurs Notion historiques (briefings/plugins).
+# Le tableau /api/tasks n'utilise plus ces constantes lorsque Soul est configuré.
 _NOTION_VERSION = "2022-06-28"
-_NOTION_BASE = "https://api.notion.com/v1"
 
+
+def _notion_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {settings.notion_token.get_secret_value()}",
+        "Notion-Version": _NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
 
 # ── Models ────────────────────────────────────────────────────
 
@@ -55,176 +63,49 @@ class EventsResponse(BaseModel):
     events: list[CalEvent]
 
 
-def _notion_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {settings.notion_token.get_secret_value()}",
-        "Notion-Version": _NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
+# ── Tâches canoniques Soul ────────────────────────────────────
 
 
-# ── Notion tasks ──────────────────────────────────────────────
+def _task_store(request: Request):  # noqa: ANN202
+    store = getattr(request.app.state, "canonical_tasks", None)
+    if store is None:
+        raise_api_error("JRV-API-005", 503, "Liste de tâches Soul non configurée")
+    return store
 
 
 @router.get("/tasks", response_model=TasksResponse)
-async def get_tasks() -> TasksResponse:
-    token = settings.notion_token.get_secret_value()
-    page_id = settings.notion_page_id
-    if not token or not page_id:
-        return TasksResponse(tasks=[])
-
+async def get_tasks(request: Request) -> TasksResponse:
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{_NOTION_BASE}/blocks/{page_id}/children",
-                headers=_notion_headers(),
-            )
-            resp.raise_for_status()
+        tasks = await _task_store(request).list_tasks()
     except Exception as e:
         collector.error("JRV-API-001", "JRV-API-001", cause=e)
-        logger.error("Notion widget error", error=str(e))
-        return TasksResponse(tasks=[])
-
-    blocks = resp.json().get("results", [])
-    tasks: list[Task] = []
-    in_section = False
-
-    for block in blocks:
-        btype = block.get("type", "")
-
-        if btype.startswith("heading_"):
-            text = "".join(
-                rt.get("plain_text", "") for rt in block.get(btype, {}).get("rich_text", [])
-            )
-            if "Tâches du jour" in text or "tâches du jour" in text.lower():
-                in_section = True
-            elif in_section:
-                break
-            continue
-
-        if in_section and btype == "to_do":
-            todo = block.get("to_do", {})
-            text = "".join(rt.get("plain_text", "") for rt in todo.get("rich_text", [])).strip()
-            if text:
-                tasks.append(
-                    Task(
-                        id=block["id"],
-                        text=text,
-                        done=bool(todo.get("checked", False)),
-                    )
-                )
-
-    return TasksResponse(tasks=tasks)
-
-
-async def _find_section_anchor(client: httpx.AsyncClient, page_id: str) -> str | None:
-    """Return the ID of the last to_do block in 'Tâches du jour'.
-
-    Falls back to the heading ID if no to_do exists yet.
-    """
-    resp = await client.get(
-        f"{_NOTION_BASE}/blocks/{page_id}/children",
-        headers=_notion_headers(),
-    )
-    resp.raise_for_status()
-    blocks = resp.json().get("results", [])
-
-    heading_id: str | None = None
-    last_todo_id: str | None = None
-    in_section = False
-
-    for block in blocks:
-        btype = block.get("type", "")
-        if btype.startswith("heading_"):
-            heading_text = "".join(
-                rt.get("plain_text", "") for rt in block.get(btype, {}).get("rich_text", [])
-            )
-            if "Tâches du jour" in heading_text or "tâches du jour" in heading_text.lower():
-                in_section = True
-                heading_id = block["id"]
-            elif in_section:
-                break
-            continue
-        if in_section and btype == "to_do":
-            last_todo_id = block["id"]
-
-    return last_todo_id or heading_id
+        logger.error("Soul tasks widget error", error=str(e))
+        raise_api_error("JRV-API-001", 502, "Lecture des tâches Soul impossible", cause=e)
+    return TasksResponse(tasks=[Task(id=t.id, text=t.text, done=t.done) for t in tasks])
 
 
 @router.post("/tasks", response_model=Task)
-async def create_task(body: TaskCreate) -> Task:
-    token = settings.notion_token.get_secret_value()
-    page_id = settings.notion_page_id
-    if not token or not page_id:
-
-        raise_api_error("JRV-API-005", 503, "Notion non configuré")
-
-    new_block = {
-        "type": "to_do",
-        "to_do": {
-            "rich_text": [{"type": "text", "text": {"content": body.text}}],
-            "checked": False,
-        },
-    }
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        anchor = await _find_section_anchor(client, page_id)
-        payload: dict = {"children": [new_block]}
-        if anchor:
-            payload["after"] = anchor
-
-        resp = await client.patch(
-            f"{_NOTION_BASE}/blocks/{page_id}/children",
-            headers=_notion_headers(),
-            json=payload,
-        )
-        resp.raise_for_status()
-
-    block = resp.json()["results"][0]
-    return Task(id=block["id"], text=body.text, done=False)
+async def create_task(body: TaskCreate, request: Request) -> Task:
+    task = await _task_store(request).create_task(body.text)
+    return Task(id=task.id, text=task.text, done=task.done)
 
 
 @router.patch("/tasks/{block_id}", response_model=Task)
-async def update_task(block_id: str, body: TaskPatch) -> Task:
-    token = settings.notion_token.get_secret_value()
-    if not token:
-
-        raise_api_error("JRV-API-005", 503, "Notion non configuré")
-
-    update: dict = {"to_do": {}}
-    if body.done is not None:
-        update["to_do"]["checked"] = body.done
-    if body.text is not None:
-        update["to_do"]["rich_text"] = [{"type": "text", "text": {"content": body.text}}]
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.patch(
-            f"{_NOTION_BASE}/blocks/{block_id}",
-            headers=_notion_headers(),
-            json=update,
+async def update_task(block_id: str, body: TaskPatch, request: Request) -> Task:
+    try:
+        task = await _task_store(request).update_task(
+            block_id, text=body.text, done=body.done
         )
-        resp.raise_for_status()
-
-    block = resp.json()
-    todo = block.get("to_do", {})
-    text = "".join(rt.get("plain_text", "") for rt in todo.get("rich_text", []))
-    return Task(id=block["id"], text=text, done=bool(todo.get("checked", False)))
+    except KeyError as exc:
+        raise_api_error("JRV-API-003", 404, "Tâche Soul introuvable", cause=exc)
+    return Task(id=task.id, text=task.text, done=task.done)
 
 
 @router.delete("/tasks/{block_id}")
-async def delete_task(block_id: str) -> dict:
-    token = settings.notion_token.get_secret_value()
-    if not token:
-
-        raise_api_error("JRV-API-005", 503, "Notion non configuré")
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.delete(
-            f"{_NOTION_BASE}/blocks/{block_id}",
-            headers=_notion_headers(),
-        )
-        resp.raise_for_status()
-
+async def delete_task(block_id: str, request: Request) -> dict:
+    deleted = await _task_store(request).delete_task(block_id)
+    if not deleted:
+        raise_api_error("JRV-API-003", 404, "Tâche Soul introuvable")
     return {"ok": True}
 
 

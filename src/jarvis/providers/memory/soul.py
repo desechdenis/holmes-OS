@@ -7,13 +7,16 @@ mais reste indépendant de la manière dont Codex, Claude ou un serveur local
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import uuid
 from collections.abc import Mapping
 from typing import Any, Protocol
 
 import httpx
 
+from jarvis.kernel.contracts import CanonicalTask
 from jarvis.kernel.holmes_memory import CanonicalMemoryEvent
 
 
@@ -200,6 +203,121 @@ class SoulMemoryStore:
                 if isinstance(value, str) and value:
                     return value
         return f"soul://holmes/events/{event.event_id}"
+
+
+class SoulTaskStore:
+    """Liste de tâches Holmes persistée comme note canonique unique dans Soul."""
+
+    _IDENTIFIER = "holmes/tasks"
+    _JSON_BLOCK = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
+
+    def __init__(self, client: SoulToolClient, *, project: str | None = None) -> None:
+        self._client = client
+        self._project = project
+        self._lock = asyncio.Lock()
+
+    async def list_tasks(self) -> list[CanonicalTask]:
+        async with self._lock:
+            return await self._read_unlocked()
+
+    async def create_task(self, text: str) -> CanonicalTask:
+        clean = " ".join(text.split()).strip()
+        if not clean:
+            raise ValueError("Le texte de la tâche ne peut pas être vide")
+        async with self._lock:
+            tasks = await self._read_unlocked()
+            task = CanonicalTask(id=f"task_{uuid.uuid4().hex[:10]}", text=clean)
+            tasks.append(task)
+            await self._write_unlocked(tasks)
+            return task
+
+    async def update_task(
+        self,
+        task_id: str,
+        *,
+        text: str | None = None,
+        done: bool | None = None,
+    ) -> CanonicalTask:
+        async with self._lock:
+            tasks = await self._read_unlocked()
+            for index, task in enumerate(tasks):
+                if task.id != task_id:
+                    continue
+                clean = " ".join(text.split()).strip() if text is not None else task.text
+                if not clean:
+                    raise ValueError("Le texte de la tâche ne peut pas être vide")
+                updated = CanonicalTask(
+                    id=task.id,
+                    text=clean,
+                    done=task.done if done is None else done,
+                )
+                tasks[index] = updated
+                await self._write_unlocked(tasks)
+                return updated
+        raise KeyError(task_id)
+
+    async def delete_task(self, task_id: str) -> bool:
+        async with self._lock:
+            tasks = await self._read_unlocked()
+            kept = [task for task in tasks if task.id != task_id]
+            if len(kept) == len(tasks):
+                return False
+            await self._write_unlocked(kept)
+            return True
+
+    async def _read_unlocked(self) -> list[CanonicalTask]:
+        arguments: dict[str, Any] = {
+            "identifier": self._IDENTIFIER,
+            "output_format": "text",
+        }
+        if self._project is not None:
+            arguments["project"] = self._project
+        try:
+            raw = await self._client.call_tool("read_note", arguments)
+        except SoulMCPError:
+            return []
+        if not isinstance(raw, str):
+            return []
+        match = self._JSON_BLOCK.search(raw)
+        if match is None:
+            return []
+        try:
+            rows = json.loads(match.group(1))
+        except json.JSONDecodeError as exc:
+            raise SoulMCPError("La note de tâches Soul contient un JSON invalide") from exc
+        if not isinstance(rows, list):
+            raise SoulMCPError("La note de tâches Soul ne contient pas une liste")
+        return [
+            CanonicalTask(id=str(row["id"]), text=str(row["text"]), done=bool(row.get("done")))
+            for row in rows
+            if isinstance(row, Mapping) and row.get("id") and row.get("text")
+        ]
+
+    async def _write_unlocked(self, tasks: list[CanonicalTask]) -> None:
+        payload = [{"id": task.id, "text": task.text, "done": task.done} for task in tasks]
+        checklist = "\n".join(
+            f"- [{'x' if task.done else ' '}] {task.text} (`{task.id}`)" for task in tasks
+        ) or "_Aucune tâche._"
+        content = (
+            "# Tâches Holmes\n\n"
+            "Cette note est la liste canonique utilisée par Holmes OS et la voix.\n\n"
+            f"{checklist}\n\n"
+            "```json\n"
+            f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+            "```\n"
+        )
+        arguments: dict[str, Any] = {
+            "title": "Tasks",
+            "content": content,
+            "directory": "holmes",
+            "tags": "holmes,tasks",
+            "note_type": "entity",
+            "overwrite": True,
+            "output_format": "json",
+        }
+        if self._project is not None:
+            arguments["project"] = self._project
+        await self._client.call_tool("write_note", arguments)
 
 
 class SoulRecall:

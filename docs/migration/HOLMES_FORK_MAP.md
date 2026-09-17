@@ -69,6 +69,9 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
   l'ancien endpoint d'approbation délègue désormais au seul exécuteur gouverné.
 - Un brouillon Gmail exige deux actions distinctes : préparation, puis confirmation
   explicite dans Mission Control. Aucun envoi direct depuis l'ancien dashboard.
+- La liste « Tâches » est canonique dans Soul en lecture/écriture. Le dashboard,
+  le moteur proactif, les briefings et la voix partagent le même registre ; Notion
+  reste uniquement un repli lorsque Soul n'est pas configuré.
 - Validation : 873 tests réussis, 1 ignoré ; 2 tests de port non exécutables dans
   le bac à sable Codex car l'ouverture de sockets locaux y est interdite.
 

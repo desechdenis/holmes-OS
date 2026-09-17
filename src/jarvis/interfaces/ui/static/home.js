@@ -651,6 +651,12 @@
       _ws = new WebSocket(proto + "//" + location.host + "/ws");
     } catch (_) { return; }
 
+    _ws.onopen = () => {
+      if (window.JARVIS_API_TOKEN) {
+        _ws.send(JSON.stringify({ type: "auth", token: window.JARVIS_API_TOKEN }));
+      }
+    };
+
     _ws.onmessage = (ev) => {
       let data;
       try { data = JSON.parse(ev.data); } catch (_) { return; }

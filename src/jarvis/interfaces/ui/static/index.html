@@ -2623,7 +2623,12 @@
     function connect() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onopen = () => { wsDot.style.background = 'var(--green)'; sphereState = 'IDLE'; };
+      ws.onopen = () => {
+        if (window.JARVIS_API_TOKEN) {
+          ws.send(JSON.stringify({ type: 'auth', token: window.JARVIS_API_TOKEN }));
+        }
+        wsDot.style.background = 'var(--green)'; sphereState = 'IDLE';
+      };
       ws.onclose = () => { wsDot.style.background = 'var(--text-dim)'; setTimeout(connect, 2000); };
       ws.onerror = () => ws.close();
       ws.onmessage = (e) => {

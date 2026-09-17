@@ -46,14 +46,15 @@ async def verify_api_token(request: HTTPConnection) -> None:
     No-op si ``api_auth_enabled=False`` (usage local inchangé).
     Quand activée : exige ``Authorization: Bearer <token>`` sauf pour les
     endpoints exemptés (health, webhooks canaux, OAuth Google) et les
-    connexions WebSocket (l'API browser ne supporte pas les headers d'upgrade).
+    connexions WebSocket (authentifiées par leur première trame dans
+    ``interfaces/api/websocket.py``).
 
     Périmètre non protégé intentionnellement :
     - Pages HTML de l'UI (``/``, ``/dashboard``, …) — routes FastAPI explicites,
       exemptées ici ; le token API est injecté dans le HTML pour les appels
       ``/api/*`` depuis le navigateur (voir ``interfaces/api/ui.py``)
     - Assets statiques (``StaticFiles`` mount) — sous-app ASGI, hors dépendance
-    - Connexions WebSocket (``/ws/*``) — navigateur sans header Authorization
+    - Connexions WebSocket (``/ws/*``) — contrôlées après upgrade par une trame auth
     - Callbacks OAuth (``/api/google/``) — redirect tiers, token impossible
     - Webhooks canaux (``/api/channels/``) — signature propre (HMAC/Token)
     """

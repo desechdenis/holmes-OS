@@ -60,6 +60,8 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 - Réponses directes Soul et Calendar persistées dans la session.
 - Telegram autorisé explicitement en mode local.
 - Appels internes et requêtes navigateur de même origine authentifiés.
+- WebSockets de chat et de logs authentifiés par une première trame dédiée ;
+  le token n'est jamais placé dans l'URL de connexion.
 - Interface Holmes accessible depuis Home Assistant sur le LAN.
 - HTTPS local activé dans Uvicorn avec un certificat auto-signé couvrant
   `localhost`, le nom du Mac et son adresse LAN. Le certificat doit être approuvé
@@ -83,16 +85,15 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
   redémarrage est placée en pause sûre et attend une reprise humaine explicite.
 - Une initiative conserve l'identifiant de la mission qu'elle lance et passe
   automatiquement à `done` ou `failed` à la réception de `MissionCompleted`.
-- Validation : 890 tests réussis, 1 ignoré.
+- Validation : 894 tests réussis, 1 ignoré.
 
 ## Restant avant publication
 
 1. Tester manuellement redémarrage, texte, voix Mac, Soul, HA et Google.
 2. Remplacer l'injection du token API dans le HTML par une vraie session navigateur.
-3. Authentifier explicitement les WebSockets avant toute exposition hors LAN fiable.
-4. Choisir les modules hérités réellement inutilisés avant suppression.
-5. Terminer le renommage externe Jarvis → Holmes sans casser le namespace Python.
-6. Reporter l'audio mobile à la phase finale : HA Assist pour le micro et le routage,
+3. Choisir les modules hérités réellement inutilisés avant suppression.
+4. Terminer le renommage externe Jarvis → Holmes sans casser le namespace Python.
+5. Reporter l'audio mobile à la phase finale : HA Assist pour le micro et le routage,
    Holmes pour le raisonnement, puis TTS Home Assistant vers la bonne cible.
-7. Remplacer l'inférence textuelle des sources d'initiative par une provenance
+6. Remplacer l'inférence textuelle des sources d'initiative par une provenance
    structurée issue des collecteurs, puis persister l'audit proactif sur disque.

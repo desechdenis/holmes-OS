@@ -1119,6 +1119,11 @@ function _scheduleReload() {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    if (window.JARVIS_API_TOKEN) {
+      ws.send(JSON.stringify({ type: 'auth', token: window.JARVIS_API_TOKEN }));
+    }
+  };
   ws.onmessage = e => {
     try {
       const msg = JSON.parse(e.data);

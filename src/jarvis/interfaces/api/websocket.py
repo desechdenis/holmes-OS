@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import time
 
@@ -32,6 +33,30 @@ _PRESENCE_COOLDOWN_S = 600  # 10 min entre deux annonces du même état
 _presence_last_notified: dict[bool, float] = {True: 0.0, False: 0.0}
 
 
+async def _authenticate_websocket(websocket: WebSocket) -> bool:
+    """Accepte puis authentifie la première trame sans exposer le token dans l'URL."""
+    await websocket.accept()
+    if not settings.api_auth_enabled:
+        return True
+    try:
+        payload = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
+    except WebSocketDisconnect:
+        return False
+    except (TimeoutError, ValueError, json.JSONDecodeError):
+        await websocket.close(code=4401, reason="Authentification requise")
+        return False
+    if not isinstance(payload, dict):
+        await websocket.close(code=4401, reason="Authentification requise")
+        return False
+    supplied = str(payload.get("token", "")) if payload.get("type") == "auth" else ""
+    expected = settings.api_token.get_secret_value()
+    if not supplied or not expected or not hmac.compare_digest(supplied, expected):
+        await websocket.close(code=4401, reason="Token invalide")
+        return False
+    await websocket.send_json({"type": "auth_ok"})
+    return True
+
+
 # ── /ws/logs — stream log buffer to the dashboard Système › Logs panel ────────
 # Format pushed to client:
 # { lv: "ok"|"info"|"warn"|"err", parts: [{t: string, cls?: "accent"|"dim"}] }
@@ -41,7 +66,8 @@ async def websocket_logs(websocket: WebSocket) -> None:
     Sends the last 50 entries on connect, then pushes new lines as they arrive.
     """
 
-    await websocket.accept()
+    if not await _authenticate_websocket(websocket):
+        return
     last_sent = 0
     try:
         # Send buffered lines on connect
@@ -196,7 +222,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
     l'ack est terminé, et la tâche background est soumise APRÈS — elle ne bloque jamais
     le client.
     """
-    await websocket.accept()
+    if not await _authenticate_websocket(websocket):
+        return
     logger.info("WebSocket connection opened")
 
     gateway: Gateway = websocket.app.state.gateway

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 
 from loguru import logger
 
+from jarvis.capabilities.tools.tasks import execute_task_command
 from jarvis.engine.agent import Agent
 from jarvis.engine.background.notifications import NotificationQueue
 from jarvis.engine.background.worker import BackgroundWorker
@@ -70,6 +71,7 @@ class Gateway:
         recall: CrossSessionRecall | None = None,
         home_state: HomeStateLookup | None = None,
         calendar: CalendarReadTool | None = None,
+        tasks: object | None = None,
     ) -> None:
         self._sessions = session_manager
         self._agent = agent
@@ -78,6 +80,7 @@ class Gateway:
         self._recall = recall
         self._home_state = home_state
         self._calendar = calendar
+        self._tasks = tasks
 
     async def handle(
         self,
@@ -92,6 +95,18 @@ class Gateway:
         notif_texts = [n.content for n in pending] if pending else None
         if notif_texts:
             logger.info("Injecting notifications", count=len(notif_texts))
+
+        # Une mutation de la liste canonique doit être confirmée par Soul, pas
+        # seulement annoncée par le modèle conversationnel.
+        task_outcome = await execute_task_command(self._tasks, message)
+        if task_outcome is not None:
+            answer = task_outcome.content
+            if not task_outcome.succeeded:
+                answer = f"Je n'ai pas modifié la liste. {answer}"
+            session.add_message("user", message)
+            session.add_message("assistant", answer)
+            logger.info("Direct task command", succeeded=task_outcome.succeeded)
+            return session, RouteEnum.INSTANT, answer
 
         # L'agenda est une source vivante : la mémoire historique ne doit pas
         # répondre à sa place, même lorsqu'un petit modèle n'appelle pas l'outil.

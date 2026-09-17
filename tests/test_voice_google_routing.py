@@ -59,6 +59,13 @@ def test_voice_parses_direct_task_commands() -> None:
         "aller manger",
     )
     assert _task_command("supprime la tâche aller manger") == ("delete", "aller manger")
+    assert _task_command("ajoute aller dormir") == ("create", "aller dormir")
+    assert _task_command("ajoute sortir les poubelles") == ("create", "sortir les poubelles")
+    assert _task_command("ajoute à ma liste acheter du lait") == ("create", "acheter du lait")
+    assert _task_command("mets appeler le médecin dans ma liste de tâches") == (
+        "create",
+        "appeler le médecin",
+    )
 
 
 class FakeTaskTool:
@@ -80,7 +87,9 @@ async def test_voice_executes_task_create_without_llm_routing() -> None:
 
     result = await _handle_voice_task_command(tool, "ajoute la tâche : aller manger")
 
-    assert result == "Tâche ajoutée dans Soul : aller manger"
+    assert result is not None
+    assert result.succeeded is True
+    assert result.content == "Tâche ajoutée dans Soul : aller manger"
     assert tool.calls == [{"action": "create", "text": "aller manger"}]
 
 
@@ -94,3 +103,18 @@ async def test_voice_resolves_task_id_before_completion() -> None:
         {"action": "list"},
         {"action": "update", "task_id": "task_123", "done": True},
     ]
+
+
+@pytest.mark.asyncio
+async def test_voice_does_not_report_a_failed_soul_write_as_success() -> None:
+    from jarvis.capabilities.tools.base import ToolResult
+
+    class FailingTaskTool:
+        async def execute(self, **kwargs: object) -> ToolResult:
+            return ToolResult("Soul indisponible", is_error=True)
+
+    result = await _handle_voice_task_command(FailingTaskTool(), "ajoute aller dormir")
+
+    assert result is not None
+    assert result.succeeded is False
+    assert result.content == "Soul indisponible"

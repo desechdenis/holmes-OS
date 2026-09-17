@@ -457,6 +457,7 @@ def build(
         recall=soul_recall or cross_recall,
         home_state=home_state_reader,
         calendar=calendar_list_tool,
+        tasks=tasks_tool,
     )
     voice_gateway = Gateway(
         session_manager=session_manager,
@@ -466,6 +467,7 @@ def build(
         recall=soul_recall or cross_recall,
         home_state=home_state_reader,
         calendar=calendar_list_tool,
+        tasks=tasks_tool,
     )
 
     # ── 14. Engine L2 — Proactive (initiatives + curator + command center) ─

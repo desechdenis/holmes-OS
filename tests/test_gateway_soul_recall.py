@@ -60,6 +60,20 @@ class FakeCalendar:
         )()
 
 
+class FakeTaskTool:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    async def execute(self, **kwargs: object):  # noqa: ANN201
+        from jarvis.capabilities.tools.base import ToolResult
+
+        self.calls.append(kwargs)
+        if self.fail:
+            return ToolResult("Soul indisponible", is_error=True)
+        return ToolResult("Tâche ajoutée dans Soul : aller dormir (id: task_test)")
+
+
 @pytest.mark.asyncio
 async def test_gateway_queries_soul_for_each_message_in_a_session() -> None:
     agent = FakeAgent()
@@ -161,3 +175,41 @@ async def test_gateway_does_not_route_weather_tomorrow_to_calendar() -> None:
     await gateway.handle("Quel temps fera-t-il demain ?")
 
     assert agent.contexts == ["Soul: Quel temps fera-t-il demain ?"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_executes_task_before_the_llm() -> None:
+    agent = FakeAgent()
+    tasks = FakeTaskTool()
+    gateway = Gateway(
+        session_manager=SessionManager(),
+        agent=agent,  # type: ignore[arg-type]
+        notifications=NotificationQueue(),
+        worker=BackgroundWorker(llm=object(), notifications=NotificationQueue()),  # type: ignore[arg-type]
+        recall=FakeSoulRecall(),  # type: ignore[arg-type]
+        tasks=tasks,
+    )
+
+    session, route, response = await gateway.handle("ajoute aller dormir")
+
+    assert route.value == "I"
+    assert response == "Tâche ajoutée dans Soul : aller dormir (id: task_test)"
+    assert tasks.calls == [{"action": "create", "text": "aller dormir"}]
+    assert agent.contexts == []
+    assert session.messages[-1] == {"role": "assistant", "content": response}
+
+
+@pytest.mark.asyncio
+async def test_gateway_never_confirms_a_failed_task_write() -> None:
+    tasks = FakeTaskTool(fail=True)
+    gateway = Gateway(
+        session_manager=SessionManager(),
+        agent=FakeAgent(),  # type: ignore[arg-type]
+        notifications=NotificationQueue(),
+        worker=BackgroundWorker(llm=object(), notifications=NotificationQueue()),  # type: ignore[arg-type]
+        tasks=tasks,
+    )
+
+    _, _, response = await gateway.handle("ajoute aller dormir")
+
+    assert response == "Je n'ai pas modifié la liste. Soul indisponible"

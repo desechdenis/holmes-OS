@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
 import warnings
 from datetime import datetime
@@ -40,6 +39,7 @@ from livekit.plugins.google.beta import gemini_tts
 
 from jarvis.bootstrap import build
 from jarvis.capabilities.skills.registry import SkillRegistry
+from jarvis.capabilities.tools.tasks import execute_task_command, parse_task_command
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.paths import PROJECT_ROOT  # noqa: E402
 from jarvis.kernel.settings import settings
@@ -368,63 +368,11 @@ def _is_live_email_request(text: str) -> bool:
 
 
 def _task_command(text: str) -> tuple[str, str | None] | None:
-    """Extrait les commandes vocales simples sans laisser le LLM décider du routage."""
-    clean = re.sub(r"\s*\[voix\]\s*$", "", text, flags=re.IGNORECASE).strip()
-    create = re.search(
-        r"\b(?:ajoute|ajouter|crée|créer)\s+(?:la\s+|une\s+)?t[aâ]che\s*:?[\s\"]*(.+?)\"?$",
-        clean,
-        re.IGNORECASE,
-    )
-    if create:
-        return "create", create.group(1).strip(" .\"")
-    complete = re.search(
-        r"\b(?:marque|mets)\s+(?:la\s+)?t[aâ]che\s+(.+?)\s+(?:comme\s+)?(?:faite|terminée|terminee)$",
-        clean,
-        re.IGNORECASE,
-    )
-    if complete:
-        return "complete", complete.group(1).strip(" .\"")
-    delete = re.search(
-        r"\b(?:supprime|efface)\s+(?:la\s+)?t[aâ]che\s+(.+)$",
-        clean,
-        re.IGNORECASE,
-    )
-    if delete:
-        return "delete", delete.group(1).strip(" .\"")
-    if re.search(
-        r"\b(?:quelles? sont|liste|lis|montre)(?:-moi)?\b.*\b(?:t[aâ]ches|choses à faire)\b",
-        clean,
-        re.IGNORECASE,
-    ):
-        return "list", None
-    return None
+    return parse_task_command(text)
 
 
-async def _handle_voice_task_command(task_tool: object | None, text: str) -> str | None:
-    command = _task_command(text)
-    if command is None or task_tool is None:
-        return None
-    action, value = command
-    if action in ("create", "list"):
-        result = await task_tool.execute(action=action, **({"text": value} if value else {}))  # type: ignore[attr-defined]
-        return result.content
-
-    listed = await task_tool.execute(action="list")  # type: ignore[attr-defined]
-    target = (value or "").casefold()
-    task_id = None
-    for line in listed.content.splitlines():
-        match = re.search(r"^- \[[ x]\] (.+) \(id: ([^)]+)\)$", line)
-        if match and (target in match.group(1).casefold() or match.group(1).casefold() in target):
-            task_id = match.group(2)
-            break
-    if task_id is None:
-        return f"Tâche introuvable dans Soul : {value}."
-    result = await task_tool.execute(  # type: ignore[attr-defined]
-        action="update" if action == "complete" else "delete",
-        task_id=task_id,
-        **({"done": True} if action == "complete" else {}),
-    )
-    return result.content
+async def _handle_voice_task_command(task_tool: object | None, text: str):  # noqa: ANN202
+    return await execute_task_command(task_tool, text)
 
 
 async def _load_voice_soul_context(soul_recall: object | None, text: str) -> str | None:
@@ -478,12 +426,21 @@ class JarvisVoiceAgent(Agent):
         context_parts: list[str] = []
 
         task_result = await _handle_voice_task_command(self._tasks_tool, text)
-        if task_result:
+        if task_result is not None:
+            if task_result.succeeded:
+                task_heading = "ACTION TÂCHES SOUL — EXÉCUTÉE ET VÉRIFIÉE"
+                task_instruction = (
+                    "Confirme simplement ce résultat en une phrase. Ne demande ni date, ni projet, "
+                    "ni précision supplémentaire."
+                )
+            else:
+                task_heading = "ACTION TÂCHES SOUL — ÉCHEC VÉRIFIÉ"
+                task_instruction = (
+                    "Explique brièvement que l'action n'a pas été effectuée. "
+                    "Ne dis jamais qu'elle a réussi."
+                )
             context_parts.append(
-                "## ACTION TÂCHES SOUL — DÉJÀ EXÉCUTÉE\n"
-                f"{task_result}\n"
-                "Confirme simplement ce résultat en une phrase. Ne demande ni date, ni projet, "
-                "ni précision supplémentaire."
+                f"## {task_heading}\n{task_result.content}\n{task_instruction}"
             )
 
         soul_context = None if task_result else await _load_voice_soul_context(self._soul_recall, text)

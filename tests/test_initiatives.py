@@ -90,6 +90,7 @@ def _write_initiative(store_dir: Path, initiative: Initiative, date_str: str) ->
                     "execution_mode": initiative.execution_mode,
                     "draft_content": initiative.draft_content,
                     "mission_description": initiative.mission_description,
+                    "project_id": initiative.project_id,
                     "status": initiative.status,
                     "created_at": initiative.created_at.isoformat(),
                 }
@@ -464,6 +465,9 @@ class TestExecutorMission:
 
             assert result["status"] == "mission_launched"
             assert result["project_id"] == "proj_abc"
+            updated = store.get_by_id(init.id)
+            assert updated is not None
+            assert updated.project_id == "proj_abc"
         finally:
             _store_mod.INITIATIVES_DIR = orig_dir
 

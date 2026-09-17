@@ -140,3 +140,6 @@ aux **vraies traversées de couches** (cf. BACKLOG si on veut généraliser).
   `tests/test_phase_d_bus_wiring.py`.
 - Câblage handler complet : à compléter au fil de l'eau (PHASE D.E)
   quand les call-sites historiques migreront du callback vers le bus.
+
+`MissionCompleted` clôt également toute initiative `in_progress` liée par
+`project_id` : verdict `success` → `done`, tout autre verdict terminal → `failed`.

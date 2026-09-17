@@ -220,6 +220,7 @@ class InitiativeExecutor:
                 {
                     "status": "in_progress",
                     "mission_description": mission,
+                    "project_id": project.id,
                 },
             )
             return {

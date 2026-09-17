@@ -15,6 +15,7 @@ le pipeline complet.)
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,6 +24,7 @@ from jarvis.kernel.events import (
     BudgetThresholdReached,
     EventBus,
     MemoryIngested,
+    MissionCompleted,
     NotificationRequested,
 )
 
@@ -215,3 +217,58 @@ async def test_background_worker_publie_NotificationRequested_sur_echec() -> Non
     assert captured[0].channel == "user"
     assert "boom" in captured[0].payload["content"]
     assert captured[0].priority == "high"
+
+
+@pytest.mark.asyncio
+async def test_mission_completed_closes_linked_initiative(tmp_path: Path) -> None:
+    """La fin d'une mission ne laisse pas son initiative bloquée en cours."""
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from jarvis.bootstrap import _wire_events
+    from jarvis.engine.background.notifications import NotificationQueue, ProactiveQueue
+    from jarvis.engine.proactive.schemas import ExecutionMode, Initiative, InitiativeType, Priority
+    from jarvis.engine.proactive.store import InitiativeStore
+
+    bus = EventBus()
+    queue = ProactiveQueue()
+    subscriber = queue.subscribe()
+    initiative = Initiative(
+        id="init_linked",
+        type=InitiativeType.AUTO_TASK,
+        title="Mission liée",
+        context="test",
+        reasoning="test",
+        action="faire le test",
+        priority=Priority.MEDIUM,
+        execution_mode=ExecutionMode.VALIDATE,
+        created_at=datetime.now(),
+        status="in_progress",
+        project_id="proj_linked",
+    )
+    with patch("jarvis.engine.proactive.store.INITIATIVES_DIR", tmp_path):
+        store = InitiativeStore()
+        store.save(initiative)
+        project_store = MagicMock()
+        project_store.load_project.return_value = None
+        _wire_events(
+            bus=bus,
+            proactive_queue=queue,
+            notifications=NotificationQueue(),
+            reflexion=MagicMock(),
+            project_store=project_store,
+            initiative_store=store,
+        )
+
+        await bus.publish(MissionCompleted(mission_id="proj_linked", verdict="success"))
+
+        updated = store.get_by_id("init_linked")
+        assert updated is not None
+        assert updated.status == "done"
+        event = subscriber.get_nowait()
+        assert event == {
+            "type": "initiative_update",
+            "initiative_id": "init_linked",
+            "project_id": "proj_linked",
+            "status": "done",
+        }

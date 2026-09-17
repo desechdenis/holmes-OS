@@ -81,7 +81,9 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 - Mission Control permet désormais de créer, inspecter, autoriser, refuser, arrêter,
   relancer et reprendre une mission depuis le tableau. Une mission interrompue au
   redémarrage est placée en pause sûre et attend une reprise humaine explicite.
-- Validation : 889 tests réussis, 1 ignoré.
+- Une initiative conserve l'identifiant de la mission qu'elle lance et passe
+  automatiquement à `done` ou `failed` à la réception de `MissionCompleted`.
+- Validation : 890 tests réussis, 1 ignoré.
 
 ## Restant avant publication
 
@@ -94,5 +96,3 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
    Holmes pour le raisonnement, puis TTS Home Assistant vers la bonne cible.
 7. Remplacer l'inférence textuelle des sources d'initiative par une provenance
    structurée issue des collecteurs, puis persister l'audit proactif sur disque.
-8. Relier la fin d'une mission lancée par une initiative à son statut (`done` ou
-   `failed`) afin d'éviter les initiatives durablement bloquées en `in_progress`.

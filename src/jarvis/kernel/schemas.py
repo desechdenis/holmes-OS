@@ -306,6 +306,7 @@ class Initiative:
     created_at: datetime = field(default_factory=datetime.now)
     draft_content: str | None = None
     mission_description: str | None = None
+    project_id: str | None = None
     status: str = "pending"
     # PHASE 6 — champs gouvernance §10.1 (defaults pour compat JSONL legacy).
     autonomy_level: AutonomyLevel = AutonomyLevel.SUGGEST

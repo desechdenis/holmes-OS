@@ -50,6 +50,7 @@ class InitiativeSummary:
     requires_validation: bool
     execution_mode: str
     status: str
+    project_id: str | None
     priority: str
     created_at: str
 
@@ -177,6 +178,7 @@ class CommandCenter:
             requires_validation=i.requires_validation,  # type: ignore[attr-defined]
             execution_mode=str(i.execution_mode),  # type: ignore[attr-defined]
             status=i.status,  # type: ignore[attr-defined]
+            project_id=i.project_id,  # type: ignore[attr-defined]
             priority=str(i.priority),  # type: ignore[attr-defined]
             created_at=i.created_at.isoformat(),  # type: ignore[attr-defined]
         )

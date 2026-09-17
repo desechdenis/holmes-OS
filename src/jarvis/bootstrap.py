@@ -532,6 +532,7 @@ def build(
         notifications=notifications,
         reflexion=reflexion,
         project_store=orchestrator._store,
+        initiative_store=initiative_store,
     )
 
     # ── 17. Conformité runtime des Protocols (GATE F1bis-b) ─────────────────
@@ -652,6 +653,7 @@ def _wire_events(
     notifications: NotificationQueue,
     reflexion: Reflexion,
     project_store: ProjectStore,
+    initiative_store: InitiativeStore,
 ) -> None:
     """Enregistre les handlers des 4 événements Phase D sur le bus.
 
@@ -684,6 +686,20 @@ def _wire_events(
 
     async def _on_mission_completed(event: MissionCompleted) -> None:
         """Mission terminée → Reflexion produit une leçon depuis le project_store."""
+        initiative_status = "done" if event.verdict == "success" else "failed"
+        for initiative in initiative_store.list_recent(days=7, statuses=["in_progress"]):
+            if initiative.project_id != event.mission_id:
+                continue
+            initiative_store.update_status(initiative.id, initiative_status)
+            proactive_queue.broadcast_event(
+                {
+                    "type": "initiative_update",
+                    "initiative_id": initiative.id,
+                    "project_id": event.mission_id,
+                    "status": initiative_status,
+                }
+            )
+
         project = project_store.load_project(event.mission_id)
         if project is None:
             return

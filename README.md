@@ -217,6 +217,21 @@ jarvis run
 jarvis voice
 ```
 
+Sur macOS, Holmes peut aussi tourner comme un service utilisateur supervisé par
+`launchd`. L'installation reste explicite et ne demande pas `sudo` :
+
+```bash
+./jarvis service-install
+./jarvis service-status
+./jarvis service-restart
+./jarvis service-stop
+./jarvis service-logs
+```
+
+`./jarvis run` conserve le mode interactif au premier plan pour le développement.
+Le service redémarre Holmes après un crash, mais un arrêt explicite avec
+`service-stop` le laisse arrêté.
+
 Le port par défaut est `8000` ; l'assistant en choisit un autre si occupé (vérifie `PORT` dans `.env`).
 
 Les deux peuvent tourner simultanément : le voice agent délègue au gateway du serveur principal, donc ils partagent la même session, la même mémoire et les mêmes outils.

@@ -8,6 +8,13 @@ cd "$(dirname "$_SCRIPT")"
 
 case "${1:-}" in
   eclosion) bash setup.sh ;;
+  service-install)   bash scripts/holmes_service.sh install ;;
+  service-uninstall) bash scripts/holmes_service.sh uninstall ;;
+  service-start)     bash scripts/holmes_service.sh start ;;
+  service-stop)      bash scripts/holmes_service.sh stop ;;
+  service-restart)   bash scripts/holmes_service.sh restart ;;
+  service-status)    bash scripts/holmes_service.sh status ;;
+  service-logs)      bash scripts/holmes_service.sh logs ;;
   api)      uv run python -m jarvis.app ;;
   voice)    uv run python -m jarvis.interfaces.voice.agent dev ;;
   livekit)
@@ -59,17 +66,15 @@ case "${1:-}" in
 
       # ── Cleanup ports + anciens process ──────────────────────────
       pkill -f "livekit-server" 2>/dev/null || true
+      pkill -f "python -m jarvis.app" 2>/dev/null || true
       pkill -f "jarvis.interfaces.voice.agent" 2>/dev/null || true
       pkill -f "voice_agent.py" 2>/dev/null || true  # legacy shim, à retirer post-refonte
-      for _p in 7880 7881 8000; do
-        _pid=$(lsof -nP -iTCP:$_p -sTCP:LISTEN -t 2>/dev/null || true)
-        [ -n "$_pid" ] && kill -9 $_pid 2>/dev/null || true
-      done
       sleep 0.3
 
       _pids=()
       _cleaning=0
       _cleanup() {
+        _status=$?
         [ "$_cleaning" -eq 1 ] && return
         _cleaning=1
         trap - INT TERM EXIT
@@ -93,7 +98,7 @@ case "${1:-}" in
         done
         wait 2>/dev/null || true
         printf "  ${TL}●${R}  ${GY}Holmes arrêté${R}\n\n"
-        exit 0
+        exit "$_status"
       }
       trap _cleanup INT TERM EXIT
 
@@ -376,6 +381,13 @@ PYEOF
     echo "    livekit    —  démarre le serveur LiveKit local"
     echo "    eclosion   —  installation et configuration"
     echo "    doctor     —  diagnostic des composants"
+    echo "    service-install   —  installe et démarre le service macOS"
+    echo "    service-start     —  démarre le service macOS"
+    echo "    service-stop      —  arrête le service macOS"
+    echo "    service-restart   —  redémarre le service macOS"
+    echo "    service-status    —  affiche l'état du service macOS"
+    echo "    service-logs      —  suit les journaux du service"
+    echo "    service-uninstall —  désactive le service macOS"
     echo ""
     exit 1
     ;;

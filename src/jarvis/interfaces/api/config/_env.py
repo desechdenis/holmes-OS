@@ -49,6 +49,7 @@ _RESTART_KEYS = {
     "LIVEKIT_URL",
     "LIVEKIT_API_KEY",
     "LIVEKIT_API_SECRET",
+    "ALLOW_NETWORK_CHANNELS_IN_LOCAL_MODE",
     "ANTHROPIC_MODEL",
     "VOICE_ANTHROPIC_MODEL",
     "TTS_PROVIDER",
@@ -103,6 +104,9 @@ _SETTINGS_FIELD_MAP: dict[str, str] = {
     "OLLAMA_BASE_URL": "ollama_base_url",
     "HOME_ASSISTANT_URL": "home_assistant_url",
     "HOME_ASSISTANT_TOKEN": "home_assistant_token",
+    "SOUL_MCP_URL": "soul_mcp_url",
+    "SOUL_PROJECT": "soul_project",
+    "ALLOW_NETWORK_CHANNELS_IN_LOCAL_MODE": "allow_network_channels_in_local_mode",
 }
 
 

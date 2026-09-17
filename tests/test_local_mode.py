@@ -75,6 +75,21 @@ class _MockLLM(LLMProvider):
         return True
 
 
+def test_local_mode_uses_a_compact_holmes_prompt(local_mode: None) -> None:
+    from jarvis.kernel.settings import settings
+
+    agent = Agent(settings=settings, llm=_MockLLM())
+    system = agent._build_system(
+        recall_summary="# Body\n\nLa note source inventorie 15 CT distincts."
+    )
+
+    assert "Tu es Holmes" in system
+    assert "15 CT distincts" in system
+    assert "Fusion 360" not in system
+    assert "Mémoire à 3 couches" not in system
+    assert len(system) < 6_000
+
+
 # ── Test 1 : is_offline_mode ──────────────────────────────────────────────────
 
 

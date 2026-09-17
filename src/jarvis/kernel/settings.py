@@ -117,6 +117,14 @@ class Settings(BaseSettings):
             "Ne jamais laisser vide avec auth activée et exposition réseau."
         ),
     )
+    allow_network_channels_in_local_mode: bool = Field(
+        default=False,
+        description=(
+            "Autorise explicitement Telegram/Discord quand le LLM tourne en mode local. "
+            "Le mode local décrit le fournisseur LLM et n'implique alors plus un arrêt "
+            "silencieux des canaux réseau demandés par l'utilisateur."
+        ),
+    )
 
     # ── Mémoire ───────────────────────────────────────────────
     memory_dir: str = Field(
@@ -375,6 +383,16 @@ class Settings(BaseSettings):
         description="Token d'accès longue durée Home Assistant.",
     )
 
+    # ── Soul / mémoire canonique Holmes ──────────────────────
+    soul_mcp_url: str = Field(
+        default="",
+        description="Endpoint HTTP MCP de Soul (Basic Memory). Vide = Soul désactivé.",
+    )
+    soul_project: str = Field(
+        default="",
+        description="Projet Soul recevant la mémoire canonique de Holmes.",
+    )
+
     # ── Docker V2 ────────────────────────────────────────────
     docker_enabled: bool = Field(
         default=False,
@@ -492,14 +510,14 @@ class Settings(BaseSettings):
 
     @property
     def display_assistant_name(self) -> str:
-        """Nom de l'assistant dans les prompts. Repli sur 'Jarvis' si non configuré.
+        """Nom de l'assistant dans les prompts. Repli sur 'Holmes' si non configuré.
 
         Miroir de `display_name` : le repli est centralisé ici, jamais dupliqué
-        en `settings.assistant_name or "Jarvis"` sur les sites d'appel. Un .env
+        en `settings.assistant_name or "Holmes"` sur les sites d'appel. Un .env
         existant n'a pas ASSISTANT_NAME, et lire le champ brut y donnerait la
         chaîne vide — donc « Tu es . » dans tous les prompts système.
         """
-        return (self.assistant_name or "").strip() or "Jarvis"
+        return (self.assistant_name or "").strip() or "Holmes"
 
     # ── Wake Up sequence ─────────────────────────────────────
     wakeup_enabled: bool = Field(

@@ -16,6 +16,7 @@ from jarvis.kernel.settings import Settings
 def test_llm_config_error_missing_anthropic_key() -> None:
     cfg = Settings(
         user_firstname="Test",
+        llm_provider="api",
         api_backend="anthropic",
         anthropic_api_key=SecretStr(""),
     )

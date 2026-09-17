@@ -35,7 +35,7 @@ from jarvis.interfaces.api.config._env import (
 from jarvis.kernel.approvals import approval_config as _approval_cfg
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.settings import settings as _s
-from jarvis.providers.llm.factory import create_background_llm, get_llm_provider
+from jarvis.providers.llm.factory import create_background_llm, create_voice_llm, get_llm_provider
 
 router = APIRouter()
 
@@ -182,13 +182,14 @@ async def update_setting(request: Request, body: SettingUpdateBody) -> dict:
         try:
             new_llm = get_llm_provider()
             new_bg_llm = create_background_llm()
+            new_voice_llm = create_voice_llm()
             gw = getattr(request.app.state, "gateway", None)
             if gw is not None:
                 # Chat principal + voice gateway — agents primaires
                 object.__setattr__(gw._agent, "_llm", new_llm)
                 vgw = getattr(request.app.state, "voice_gateway", None)
                 if vgw is not None:
-                    object.__setattr__(vgw._agent, "_llm", new_llm)
+                    object.__setattr__(vgw._agent, "_llm", new_voice_llm)
 
                 # CrossSessionRecall (partagé entre gateway et voice_gateway)
                 recall = getattr(gw, "_recall", None)
@@ -204,7 +205,7 @@ async def update_setting(request: Request, body: SettingUpdateBody) -> dict:
                 # BackgroundWorker
                 worker = getattr(request.app.state, "worker", None)
                 if worker is not None and hasattr(worker, "_llm"):
-                    object.__setattr__(worker, "_llm", new_llm)
+                    object.__setattr__(worker, "_llm", new_bg_llm)
 
                 # InitiativeGenerator (dans ProactiveEngine)
                 pe = getattr(request.app.state, "proactive_engine", None)

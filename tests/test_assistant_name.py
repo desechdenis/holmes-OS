@@ -20,8 +20,8 @@ from jarvis.kernel.settings import Settings
 @pytest.mark.parametrize(
     ("configured", "attendu"),
     [
-        ("", "Jarvis"),  # .env existant, clé absente
-        ("   ", "Jarvis"),  # champ vidé depuis l'UI Réglages
+        ("", "Holmes"),  # .env existant, clé absente
+        ("   ", "Holmes"),  # champ vidé depuis l'UI Réglages
         ("Vendredi", "Vendredi"),
         ("  Vendredi  ", "Vendredi"),
     ],
@@ -32,7 +32,7 @@ def test_display_assistant_name_repli(configured: str, attendu: str) -> None:
 
 def test_display_assistant_name_defaut_sans_champ() -> None:
     """Settings construit sans mentionner assistant_name du tout."""
-    assert Settings().display_assistant_name == "Jarvis"
+    assert Settings().display_assistant_name == "Holmes"
 
 
 def test_prompts_ne_contiennent_jamais_de_nom_vide() -> None:

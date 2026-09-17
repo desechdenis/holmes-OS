@@ -24,6 +24,7 @@ from jarvis.kernel.schemas import ToolCapture
 from jarvis.kernel.settings import Settings
 
 _STATIC_PROMPT_PATH = PROMPTS_DIR / "system_static.md"
+_LOCAL_STATIC_PROMPT_PATH = PROMPTS_DIR / "system_holmes_local.md"
 _MAX_TOOL_RESULT_CHARS = 12_000
 
 
@@ -79,8 +80,10 @@ class Agent:
     ) -> str:
         """Assemble le prompt système : partie statique + contexte dynamique."""
         _s = self._settings
+        is_local = _s.llm_provider == "local"
 
-        static_system = _STATIC_PROMPT_PATH.read_text(encoding="utf-8")
+        prompt_path = _LOCAL_STATIC_PROMPT_PATH if is_local else _STATIC_PROMPT_PATH
+        static_system = prompt_path.read_text(encoding="utf-8")
         # Le prompt statique est rédigé avec "Barth" comme nom par défaut ; on le
         # remplace par le prénom configuré (USER_FIRSTNAME) pour que l'assistant appelle
         # réellement l'utilisateur par son nom. Repli sur "Barth" si non configuré.
@@ -105,7 +108,7 @@ class Agent:
         dynamic_parts: list[str] = ["=== CONTEXTE DYNAMIQUE ==="]
 
         # Identité LLM — indispensable pour les modèles locaux qui ne savent pas ce qu'ils sont
-        if _s.llm_provider == "local":
+        if is_local:
             llm_id = f"Ollama / {_s.ollama_model}"
         else:
             _model_map = {
@@ -121,7 +124,13 @@ class Agent:
         dynamic_parts.append(f"## Date et heure\n\n{now.strftime('%Y-%m-%d %H:%M')}")
 
         if recall_summary:
-            dynamic_parts.append(f"## Rappel de sessions précédentes\n\n{recall_summary}")
+            dynamic_parts.append(
+                "## Mémoire pertinente\n\n"
+                "Cette information vient de la mémoire canonique Soul. Lorsqu'elle répond "
+                "à la question, réponds directement avec ses faits ; ne demande pas de "
+                "clarification et ne la remplace pas par une supposition.\n\n"
+                f"{recall_summary}"
+            )
 
         if self._user_model_path is not None and self._user_model_path.exists():
             model_text = self._user_model_path.read_text(encoding="utf-8").strip()
@@ -133,11 +142,14 @@ class Agent:
             if prefs:
                 dynamic_parts.append(f"## Préférences {firstname}\n\n{prefs}")
 
-        if self._memory_index is not None:
+        # Le modèle local travaille sur un budget de contexte volontairement
+        # resserré : Soul contient le fait demandé ; l'ancien index et le
+        # catalogue complet d'outils noyaient ce fait avant le message utilisateur.
+        if not is_local and self._memory_index is not None:
             index_content = self._memory_index.read()
             dynamic_parts.append(f"## Mémoire index\n\n{index_content}")
 
-        if self._topic_store is not None:
+        if not is_local and self._topic_store is not None:
             topic_names = self._topic_store.list_all()
             if topic_names:
                 names_list = "\n".join(f"- `{name}`" for name in topic_names)
@@ -149,7 +161,7 @@ class Agent:
                     f"{names_list}"
                 )
 
-        if self._tool_registry is not None and self._tool_registry.has_tools():
+        if not is_local and self._tool_registry is not None and self._tool_registry.has_tools():
             tool_lines = "\n".join(
                 f"- `{s['name']}` : {s['description']}" for s in self._tool_registry.schemas()
             )
@@ -157,7 +169,7 @@ class Agent:
                 f"## Outils disponibles (router [CF] pour les utiliser)\n\n{tool_lines}"
             )
 
-        if self._skill_registry is not None:
+        if not is_local and self._skill_registry is not None:
             skills_prompt = self._skill_registry.get_combined_system_prompt()
             if skills_prompt:
                 dynamic_parts.append("# SKILLS ACTIFS\n\n" + skills_prompt)

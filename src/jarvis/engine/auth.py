@@ -73,11 +73,8 @@ async def verify_api_token(request: HTTPConnection) -> None:
 
     auth_header: str = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        logger.warning(
-            "Auth: token manquant",
-            path=path,
-            client=request.client.host if request.client else "?",
-        )
+        client = request.client.host if request.client else "?"
+        logger.warning(f"Auth: token manquant — path={path} client={client}")
         raise_api_error("JRV-API-002", 401, "Token Bearer requis.")
 
     token = auth_header[len("Bearer ") :]
@@ -86,9 +83,6 @@ async def verify_api_token(request: HTTPConnection) -> None:
         token.encode("utf-8"),
         expected.encode("utf-8"),
     ):
-        logger.warning(
-            "Auth: token invalide",
-            path=path,
-            client=request.client.host if request.client else "?",
-        )
+        client = request.client.host if request.client else "?"
+        logger.warning(f"Auth: token invalide — path={path} client={client}")
         raise_api_error("JRV-API-002", 401, "Token invalide.")

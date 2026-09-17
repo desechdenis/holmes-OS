@@ -23,7 +23,7 @@
   /* ─── Config des connecteurs ─── */
   const CONNECTOR_CONFIG = {
     "Gmail":              { kind: "oauth_key", url: "/api/google/auth/gmail", keys: [
-      { key: "GOOGLE_CLIENT_ID",     label: "Client ID",     secret: false, hint: "console.cloud.google.com · OAuth client type « Web » · Redirect URIs : http://127.0.0.1:8000/api/google/callback/gmail + .../calendar" },
+      { key: "GOOGLE_CLIENT_ID",     label: "Client ID",     secret: false, hint: "console.cloud.google.com · OAuth client type « Web » · Ajoute exactement : http://localhost:8000/api/google/callback/gmail et http://localhost:8000/api/google/callback/calendar" },
       { key: "GOOGLE_CLIENT_SECRET", label: "Client Secret", secret: true },
     ]},
     "Google Calendar":    { kind: "oauth_key", url: "/api/google/auth/calendar", keys: [
@@ -546,7 +546,7 @@
 
   function triggerConnect(c, cfg, expandEl) {
     if (cfg.kind === "oauth") {
-      window.location.href = cfg.url;
+      J.beginExternalAuth(cfg.url);
       return;
     }
     if (cfg.kind === "stub") {
@@ -635,7 +635,7 @@
           style: { marginTop: "10px" },
         }));
         const connectBtn = el("button", { class: "cn-save-btn", text: "Connecter mon compte →" });
-        connectBtn.addEventListener("click", () => { window.location.href = cfg.url; });
+        connectBtn.addEventListener("click", () => { J.beginExternalAuth(cfg.url); });
         expandEl.appendChild(connectBtn);
       }
       expandEl.classList.add("open");

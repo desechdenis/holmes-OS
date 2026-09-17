@@ -174,7 +174,7 @@
           text: c.token_health === "ok" ? "Renouveler" : "Reconnecter",
         });
         btn.style.cssText = "padding:4px 10px;font-size:11px;";
-        btn.addEventListener("click", () => { window.location.href = c.reconnect_url; });
+        btn.addEventListener("click", () => { J.beginExternalAuth(c.reconnect_url); });
         row.appendChild(btn);
       } else {
         row.appendChild(el("div"));

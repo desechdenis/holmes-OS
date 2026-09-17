@@ -29,6 +29,7 @@ from jarvis.interfaces.channels.discord_bot import DiscordChannel
 from jarvis.interfaces.channels.gateway import MessagingGateway
 from jarvis.interfaces.channels.telegram_bot import TelegramChannel
 from jarvis.kernel.connectivity import is_offline_mode
+from jarvis.kernel.settings import settings
 
 if TYPE_CHECKING:
     from jarvis.bootstrap import Container
@@ -51,9 +52,13 @@ async def setup_channels(app: FastAPI, container: Container) -> MessagingGateway
     discord_enabled = os.getenv("DISCORD_ENABLED", "false").lower() == "true"
     messaging_enabled = os.getenv("MESSAGING_GATEWAY_ENABLED", "false").lower() == "true"
 
-    if is_offline_mode() and (telegram_enabled or discord_enabled or messaging_enabled):
+    if (
+        is_offline_mode()
+        and not settings.allow_network_channels_in_local_mode
+        and (telegram_enabled or discord_enabled or messaging_enabled)
+    ):
         logger.info(
-            "Canaux réseau (Telegram/Discord) désactivés — mode local actif",
+            "Canaux réseau désactivés — mode local actif et autorisation absente",
             telegram=telegram_enabled,
             discord=discord_enabled,
         )

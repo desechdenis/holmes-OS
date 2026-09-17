@@ -80,3 +80,14 @@ def test_inject_defines_api_base(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ui, "settings", _fake_settings(False, ""))
     out = ui.inject_client_config("<head></head>")
     assert "window.JARVIS_API_BASE" in out
+
+
+@pytest.mark.asyncio
+async def test_home_versions_livekit_voice_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le navigateur ne doit pas conserver un client vocal antérieur à l'auth API."""
+    monkeypatch.setattr(ui, "settings", _fake_settings(True, "tok"))
+
+    response = await ui.home_ui()
+    html = response.body.decode("utf-8")
+
+    assert 'src="/voice_livekit.js?v=' in html

@@ -200,6 +200,29 @@
   };
   Jarvis.authHeaders = authHeaders;
 
+  // Filet de compatibilité pour les vues historiques qui appellent fetch()
+  // directement. Le Bearer n'est ajouté qu'aux routes Holmes de même origine,
+  // afin de ne jamais transmettre le token à Spotify, Google ou un autre tiers.
+  const _nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const rawUrl = typeof input === "string" ? input : input?.url;
+    let target;
+    try { target = new URL(rawUrl, window.location.href); }
+    catch (_) { return _nativeFetch(input, init); }
+
+    const protectedLocalPath =
+      target.origin === window.location.origin &&
+      (target.pathname.startsWith("/api/") || target.pathname.startsWith("/internal/"));
+    if (!protectedLocalPath || !window.JARVIS_API_TOKEN) return _nativeFetch(input, init);
+
+    const sourceHeaders = init?.headers || (input instanceof Request ? input.headers : undefined);
+    const headers = new Headers(sourceHeaders || {});
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", "Bearer " + window.JARVIS_API_TOKEN);
+    }
+    return _nativeFetch(input, Object.assign({}, init || {}, { headers }));
+  };
+
   /* ───────── Navigation (iframe-aware) ───────── */
   Jarvis.navigate = function (url) {
     // Si on tourne dans l'iframe, déléguer au shell parent
@@ -210,6 +233,17 @@
     // Si le shell home a enregistré un handler iframe
     if (typeof Jarvis.navigateFrame === "function") {
       Jarvis.navigateFrame(url);
+      return;
+    }
+    window.location.href = url;
+  };
+
+  // OAuth providers deliberately forbid being embedded in an iframe.  Holmes
+  // renders its secondary pages in one, so an authorization flow must replace
+  // the shell page rather than navigate only the frame.
+  Jarvis.beginExternalAuth = function (url) {
+    if (window !== window.top) {
+      window.top.location.href = url;
       return;
     }
     window.location.href = url;

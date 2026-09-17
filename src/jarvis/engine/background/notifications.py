@@ -118,10 +118,13 @@ def get_broadcast_fn() -> object:
         def _post() -> None:
             url = f"http://localhost:{settings.port}/internal/broadcast"
             data = _json.dumps(event).encode()
+            headers = {"Content-Type": "application/json"}
+            if settings.api_auth_enabled:
+                headers["Authorization"] = f"Bearer {settings.api_token.get_secret_value()}"
             req = urllib.request.Request(
                 url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 method="POST",
             )
             try:

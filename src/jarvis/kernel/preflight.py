@@ -214,12 +214,29 @@ def check_port() -> bool:
             pass
 
 
+def check_tls() -> bool:
+    enabled = os.getenv("TLS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return True
+    cert = Path(os.getenv("TLS_CERT_FILE", "config/tls/holmes.crt")).expanduser()
+    key = Path(os.getenv("TLS_KEY_FILE", "config/tls/holmes.key")).expanduser()
+    missing = [str(path) for path in (cert, key) if not path.is_file()]
+    if missing:
+        _err(
+            "JRV-KRN-011",
+            "TLS activé mais certificat ou clé manquant",
+            "Fichier(s) absent(s) : " + ", ".join(missing),
+        )
+        return False
+    return True
+
+
 def main() -> int:
     load_dotenv()
     print(_c("2", "Vérification de l'environnement Jarvis…"), file=sys.stderr)
 
     fatal = False
-    for chk in (check_python, check_deps, check_env, check_port):
+    for chk in (check_python, check_deps, check_env, check_tls, check_port):
         try:
             if not chk():
                 fatal = True

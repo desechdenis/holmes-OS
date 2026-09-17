@@ -47,7 +47,7 @@ case "${1:-}" in
         printf "  ${DG}─────────────────────────────────────────────${R}\n"
         printf "  ${TL}${B}✓  Holmes prêt${R}\n"
         printf "\n"
-        printf "  ${WH}→${R} ${B}http://localhost:8000${R}      ${GY}interface${R}\n"
+        printf "  ${WH}→${R} ${B}${_API_SCHEME:-http}://localhost:8000${R}      ${GY}interface${R}\n"
         printf "  ${WH}→${R} ${GY}clique sur le micro pour le mode vocal${R}\n"
         printf "  ${WH}→${R} ${GY}Ctrl-C pour arrêter${R}\n"
         printf "  ${DG}─────────────────────────────────────────────${R}\n"
@@ -100,7 +100,7 @@ case "${1:-}" in
       _wait_http() {
         local url="$1" max="${2:-60}" i=0
         while [ $i -lt $max ]; do
-          curl -fsS -o /dev/null --max-time 1 "$url" 2>/dev/null && return 0
+          curl -fsS ${_CURL_INSECURE:-} -o /dev/null --max-time 1 "$url" 2>/dev/null && return 0
           sleep 0.3; i=$((i+1))
         done
         return 1
@@ -144,10 +144,18 @@ case "${1:-}" in
 
       # 2) FastAPI
       _row_wait "API" "démarrage..."
+      _TLS_ENABLED=$(uv run python -c "from jarvis.kernel.settings import settings; print(str(settings.tls_enabled).lower())")
+      if [ "$_TLS_ENABLED" = "true" ]; then
+        _API_SCHEME=https
+        _CURL_INSECURE=-k
+      else
+        _API_SCHEME=http
+        _CURL_INSECURE=
+      fi
       HOLMES_API_RELOAD=false uv run python -m jarvis.app > "$API_LOG" 2>&1 &
       _pids+=($!)
-      if _wait_http "http://127.0.0.1:8000/health" 90; then
-        printf "$CLEAR_LINE"; _row_ok "API" "http://localhost:8000"
+      if _wait_http "$_API_SCHEME://127.0.0.1:8000/health" 90; then
+        printf "$CLEAR_LINE"; _row_ok "API" "$_API_SCHEME://localhost:8000"
       else
         printf "$CLEAR_LINE"; _row_err "API" "l API n a pas demarre (ce n est PAS l API LLM)"
         # La vraie erreur est dans le log (crash au demarrage : dep native

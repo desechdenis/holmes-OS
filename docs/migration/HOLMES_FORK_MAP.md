@@ -61,6 +61,9 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 - Telegram autorisé explicitement en mode local.
 - Appels internes et requêtes navigateur de même origine authentifiés.
 - Interface Holmes accessible depuis Home Assistant sur le LAN.
+- HTTPS local activé dans Uvicorn avec un certificat auto-signé couvrant
+  `localhost`, le nom du Mac et son adresse LAN. Le certificat doit être approuvé
+  sur chaque téléphone ou navigateur avant d'intégrer l'URL dans Home Assistant.
 - Mission Engine : critères de succès obligatoires, vérification en trois couches,
   gouvernance risque/permission/budget et retry borné présents et testés.
 - Reprise de mission : les claims d'étapes sont désormais libérés à la fin du worker

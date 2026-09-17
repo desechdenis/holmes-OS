@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     )
     port: int = Field(default=8000)
     environment: Literal["development", "production"] = Field(default="development")
+    tls_enabled: bool = Field(default=False, description="Active HTTPS dans Uvicorn.")
+    tls_cert_file: str = Field(default="config/tls/holmes.crt")
+    tls_key_file: str = Field(default="config/tls/holmes.key")
 
     # ── Sécurité réseau ───────────────────────────────────────
     api_auth_enabled: bool = Field(

@@ -69,3 +69,35 @@ def test_check_port_detects_occupied_port(monkeypatch: pytest.MonkeyPatch) -> No
         assert preflight.check_port() is False
     finally:
         sock.close()
+
+
+def test_check_tls_is_optional(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TLS_ENABLED", "false")
+    monkeypatch.setenv("TLS_CERT_FILE", "/certificat/inexistant")
+    monkeypatch.setenv("TLS_KEY_FILE", "/cle/inexistante")
+
+    assert preflight.check_tls() is True
+
+
+def test_check_tls_accepts_existing_certificate_pair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cert = tmp_path / "holmes.crt"
+    key = tmp_path / "holmes.key"
+    cert.touch()
+    key.touch()
+    monkeypatch.setenv("TLS_ENABLED", "true")
+    monkeypatch.setenv("TLS_CERT_FILE", str(cert))
+    monkeypatch.setenv("TLS_KEY_FILE", str(key))
+
+    assert preflight.check_tls() is True
+
+
+def test_check_tls_rejects_missing_certificate_pair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TLS_ENABLED", "true")
+    monkeypatch.setenv("TLS_CERT_FILE", str(tmp_path / "holmes.crt"))
+    monkeypatch.setenv("TLS_KEY_FILE", str(tmp_path / "holmes.key"))
+
+    assert preflight.check_tls() is False

@@ -353,6 +353,8 @@ def main() -> None:
         "no",
         "off",
     }
+    ssl_certfile = settings.tls_cert_file if settings.tls_enabled else None
+    ssl_keyfile = settings.tls_key_file if settings.tls_enabled else None
     uvicorn.run(
         "jarvis.app:app",
         host=settings.host,
@@ -360,6 +362,8 @@ def main() -> None:
         reload=reload_enabled,
         reload_dirs=["src/jarvis", "prompts", "config"],
         log_level="warning",
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
     )
 
 

@@ -22,6 +22,7 @@ import pytest
 
 from jarvis.engine.audit import AuditLog
 from jarvis.engine.mission.governance import Governance
+from jarvis.engine.mission.orchestrator import ProjectOrchestrator
 from jarvis.engine.mission.project_store import ProjectStore
 from jarvis.engine.mission.schemas import (
     Project,
@@ -199,6 +200,43 @@ def test_persistance_projet_ancien_format_compat(tmp_path: Path) -> None:
         assert s.access_level == AccessLevel.WRITE_LOCAL
         assert s.verified is False
         assert s.verification_notes is None
+
+
+def test_recovery_places_interrupted_project_in_safe_pause(tmp_path: Path) -> None:
+    """Un redémarrage ne relance jamais silencieusement une étape interrompue."""
+    with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
+        store = ProjectStore()
+        project = store.create_project("Mission interrompue", "Crash test")
+        project.status = ProjectStatus.RUNNING
+        project.steps = [
+            Step(
+                id="s1",
+                title="Action externe",
+                description="desc",
+                status=StepStatus.WAITING_APPROVAL,
+                success_criterion="Action vérifiée",
+            ),
+            Step(
+                id="s2",
+                title="Suite",
+                description="desc",
+                status=StepStatus.PENDING,
+                success_criterion="Suite vérifiée",
+            ),
+        ]
+        store.save_project(project)
+        assert store.claim_step(project.id, "s1", "worker-dead")
+
+        orchestrator = ProjectOrchestrator.__new__(ProjectOrchestrator)
+        orchestrator._store = store
+        recovered = orchestrator.recover_interrupted_projects()
+
+        assert recovered == [project.id]
+        loaded = store.load_project(project.id)
+        assert loaded is not None
+        assert loaded.status == ProjectStatus.PAUSED
+        assert loaded.steps[0].status == StepStatus.PENDING
+        assert store.claim_step(project.id, "s1", "worker-new") is True
 
 
 # ── 3. Step bloque la progression si non vérifié (§4.4) ───────────────────────

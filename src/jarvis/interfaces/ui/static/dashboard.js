@@ -71,7 +71,7 @@
   async function loadMissions() {
     try {
       const raw = await J.api.get("/api/projects");
-      const sMap = { running:"run", planning:"run", waiting:"wait", queued:"queue", queue:"queue", done:"done", failed:"failed", killed:"killed" };
+      const sMap = { running:"run", planning:"run", paused:"wait", waiting:"wait", queued:"queue", queue:"queue", done:"done", failed:"failed", killed:"killed" };
       const toRow = p => ({
         id:     p.id ? p.id.slice(0,6).toUpperCase() : "?",
         status: sMap[p.status] || "run",
@@ -770,6 +770,29 @@
           const err = el("div", { class: "mp-step-error", text: s.error.slice(0, 200) });
           content.appendChild(err);
         }
+        if (s.status === "waiting_approval") {
+          const approvalRow = el("div", { class: "mp-act-row" });
+          const approve = el("button", { class: "m-btn", text: "Autoriser" });
+          const refuse = el("button", { class: "m-btn danger", text: "Refuser" });
+          const resolve = async approved => {
+            approve.disabled = true; refuse.disabled = true;
+            try {
+              const result = await J.api.post("/api/projects/" + m.rawId + "/approve", {
+                step_id: s.id, approved,
+              });
+              if (!result.resolved) throw new Error("La demande n'est plus active");
+              J.notify({ kind: "success", text: approved ? "Étape autorisée" : "Étape refusée" });
+              closePanel(); renderMissions();
+            } catch (e) {
+              J.notify({ kind: "error", text: e.message });
+              approve.disabled = false; refuse.disabled = false;
+            }
+          };
+          approve.addEventListener("click", () => resolve(true));
+          refuse.addEventListener("click", () => resolve(false));
+          approvalRow.appendChild(approve); approvalRow.appendChild(refuse);
+          content.appendChild(approvalRow);
+        }
         row.appendChild(num); row.appendChild(content);
         stepSec.appendChild(row);
       });
@@ -801,17 +824,30 @@
       const actSec = el("div", { class: "panel-section" });
       actSec.appendChild(el("div", { class: "panel-section-title", text: "Actions" }));
       const actRow = el("div", { class: "mp-act-row" });
-      const retryBtn = el("button", { class: "m-btn", text: "Retry" });
+      const retryBtn = el("button", { class: "m-btn", text: m.status === "wait" ? "Reprendre" : "Retry" });
       retryBtn.addEventListener("click", async () => {
         retryBtn.textContent = "…"; retryBtn.disabled = true;
         try {
-          await J.api.post("/api/projects/" + m.rawId + "/retry");
+          const endpoint = m.status === "wait" ? "/resume" : "/retry";
+          await J.api.post("/api/projects/" + m.rawId + endpoint);
           J.notify({ kind: "success", text: "Relancée" });
           closePanel();
           renderMissions();
         } catch (e) { J.notify({ kind: "error", text: e.message }); retryBtn.textContent = "Retry"; retryBtn.disabled = false; }
       });
-      actRow.appendChild(retryBtn);
+      if (m.status !== "run") actRow.appendChild(retryBtn);
+      if (m.status === "run") {
+        const killBtn = el("button", { class: "m-btn danger", text: "Arrêter" });
+        killBtn.addEventListener("click", async () => {
+          killBtn.disabled = true;
+          try {
+            await J.api.post("/api/projects/" + m.rawId + "/kill");
+            J.notify({ kind: "success", text: "Arrêt demandé" });
+            closePanel(); renderMissions();
+          } catch (e) { J.notify({ kind: "error", text: e.message }); killBtn.disabled = false; }
+        });
+        actRow.appendChild(killBtn);
+      }
       actSec.appendChild(actRow);
       body.appendChild(actSec);
     }
@@ -829,6 +865,40 @@
       active.forEach(m => activeList.appendChild(renderMissionRow(m)));
     }
     wrap.appendChild(ghostSec("En cours", active.length + " active" + (active.length > 1 ? "s" : ""), null, activeList));
+
+    const addBar = el("div", { class: "add-bar" });
+    addBar.appendChild(el("span", { text: "+" }));
+    addBar.appendChild(el("span", { text: "Nouvelle mission" }));
+    addBar.addEventListener("click", () => {
+      const input = document.createElement("textarea");
+      input.placeholder = "Décris le résultat attendu et les contraintes de la mission…";
+      input.className = "task-new-input";
+      input.rows = 3;
+      addBar.replaceWith(input);
+      input.focus();
+      let submitted = false;
+      async function submit() {
+        if (submitted) return;
+        const mission = input.value.trim();
+        if (!mission) { submitted = true; input.replaceWith(addBar); return; }
+        submitted = true; input.disabled = true;
+        J.notify({ kind: "info", text: "Holmes prépare le plan de mission…" });
+        try {
+          await J.api.post("/api/projects", { mission, timeout_minutes: 30 });
+          J.notify({ kind: "success", text: "Mission lancée" });
+          renderMissions();
+        } catch (e) {
+          J.notify({ kind: "error", text: e.message });
+          input.disabled = false; submitted = false;
+        }
+      }
+      input.addEventListener("keydown", e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); }
+        if (e.key === "Escape") { submitted = true; input.replaceWith(addBar); }
+      });
+      input.addEventListener("blur", () => { if (!input.value.trim()) { submitted = true; input.replaceWith(addBar); } });
+    });
+    wrap.appendChild(addBar);
 
     if (ended.length) {
       const endedList = el("div");

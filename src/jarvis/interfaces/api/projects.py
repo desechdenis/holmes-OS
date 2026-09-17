@@ -29,6 +29,11 @@ class ApprovalBody(BaseModel):
     approved: bool
 
 
+class ProjectCreateBody(BaseModel):
+    mission: str
+    timeout_minutes: int = 30
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -49,6 +54,16 @@ async def list_projects(request: Request) -> list[dict]:
         }
         for p in projects
     ]
+
+
+@router.post("/api/projects")
+async def create_project(body: ProjectCreateBody, request: Request) -> dict:
+    mission = body.mission.strip()
+    if not mission:
+        raise_api_error("JRV-API-001", 422, "La mission ne peut pas être vide")
+    timeout = min(max(body.timeout_minutes, 1), 240)
+    project = await _orch(request).create_and_run(mission, timeout_minutes=timeout)
+    return {"ok": True, "project_id": project.id, "status": project.status}
 
 
 @router.get("/api/projects/{project_id}")
@@ -91,6 +106,14 @@ async def retry_project(project_id: str, request: Request) -> dict:
     project = await orch.retry_project(project_id)
     if not project:
         raise_api_error("JRV-API-003", 404, f"Projet non trouvé : {project_id}")
+    return {"ok": True, "project_id": project.id, "status": project.status}
+
+
+@router.post("/api/projects/{project_id}/resume")
+async def resume_project(project_id: str, request: Request) -> dict:
+    project = await _orch(request).resume_project(project_id)
+    if not project:
+        raise_api_error("JRV-API-003", 409, f"Projet non reprenable : {project_id}")
     return {"ok": True, "project_id": project.id, "status": project.status}
 
 

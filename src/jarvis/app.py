@@ -132,6 +132,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.curator = container.curator
     app.state.command_center = container.command_center
 
+    recovered_projects = container.orchestrator.recover_interrupted_projects()
+    if recovered_projects:
+        logger.warning(
+            "Missions interrompues placées en pause sûre",
+            count=len(recovered_projects),
+        )
+
     # Singleton résiduel post-étape 2 (b) :
     #  - `tracker` (jarvis.engine.tracking) reste module-level pour cette étape
     #    (b) et bascule en injection constructeur dans l'étape (d) qui touche

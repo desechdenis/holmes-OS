@@ -278,6 +278,29 @@ class ProjectOrchestrator:
     def list_projects(self) -> list[Project]:
         return self._store.list_projects()
 
+    def recover_interrupted_projects(self) -> list[str]:
+        """Place en pause sûre les missions laissées actives par un arrêt du process.
+
+        Aucune étape n'est relancée automatiquement : les appels externes précédents
+        peuvent avoir produit un effet. Mission Control proposera une reprise explicite.
+        """
+        recovered: list[str] = []
+        for project in self._store.list_projects():
+            if project.status != ProjectStatus.RUNNING:
+                continue
+            for step in project.steps:
+                if step.status in (StepStatus.RUNNING, StepStatus.WAITING_APPROVAL):
+                    step.status = StepStatus.PENDING
+                    step.started_at = None
+                    step.error = None
+            project.status = ProjectStatus.PAUSED
+            self._store.clear_project_claims(project.id)
+            self._store.save_project(project)
+            recovered.append(project.id)
+        if recovered:
+            logger.warning("Interrupted projects recovered as paused", projects=recovered)
+        return recovered
+
     def get_logs(self, project_id: str, last_n: int = 200) -> list[LogEntry]:
         project = self._store.load_project(project_id)
         if not project:

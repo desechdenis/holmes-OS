@@ -1,9 +1,11 @@
 import pytest
 
 from jarvis.interfaces.voice.agent import (
+    _handle_voice_task_command,
     _is_live_calendar_request,
     _is_live_email_request,
     _load_voice_soul_context,
+    _task_command,
     _voice_system_base,
 )
 
@@ -44,3 +46,51 @@ async def test_voice_queries_soul_before_the_llm_turn() -> None:
         "## MÉMOIRE CANONIQUE SOUL — recherche en direct\n"
         "Body contient 15 conteneurs CT."
     )
+
+
+def test_voice_parses_direct_task_commands() -> None:
+    assert _task_command("tu peux ajouter la tache : aller manger [voix]") == (
+        "create",
+        "aller manger",
+    )
+    assert _task_command("quelles sont mes tâches ?") == ("list", None)
+    assert _task_command("marque la tâche aller manger comme terminée") == (
+        "complete",
+        "aller manger",
+    )
+    assert _task_command("supprime la tâche aller manger") == ("delete", "aller manger")
+
+
+class FakeTaskTool:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def execute(self, **kwargs: object) -> object:
+        from jarvis.capabilities.tools.base import ToolResult
+
+        self.calls.append(kwargs)
+        if kwargs["action"] == "list":
+            return ToolResult("- [ ] aller manger (id: task_123)")
+        return ToolResult("Tâche ajoutée dans Soul : aller manger")
+
+
+@pytest.mark.asyncio
+async def test_voice_executes_task_create_without_llm_routing() -> None:
+    tool = FakeTaskTool()
+
+    result = await _handle_voice_task_command(tool, "ajoute la tâche : aller manger")
+
+    assert result == "Tâche ajoutée dans Soul : aller manger"
+    assert tool.calls == [{"action": "create", "text": "aller manger"}]
+
+
+@pytest.mark.asyncio
+async def test_voice_resolves_task_id_before_completion() -> None:
+    tool = FakeTaskTool()
+
+    await _handle_voice_task_command(tool, "marque la tâche aller manger comme terminée")
+
+    assert tool.calls == [
+        {"action": "list"},
+        {"action": "update", "task_id": "task_123", "done": True},
+    ]

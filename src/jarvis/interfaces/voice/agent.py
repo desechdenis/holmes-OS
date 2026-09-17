@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import warnings
 from datetime import datetime
@@ -366,6 +367,66 @@ def _is_live_email_request(text: str) -> bool:
     return any(term in lowered for term in ("e-mail", "email", "mail", "mails", "boîte"))
 
 
+def _task_command(text: str) -> tuple[str, str | None] | None:
+    """Extrait les commandes vocales simples sans laisser le LLM décider du routage."""
+    clean = re.sub(r"\s*\[voix\]\s*$", "", text, flags=re.IGNORECASE).strip()
+    create = re.search(
+        r"\b(?:ajoute|ajouter|crée|créer)\s+(?:la\s+|une\s+)?t[aâ]che\s*:?[\s\"]*(.+?)\"?$",
+        clean,
+        re.IGNORECASE,
+    )
+    if create:
+        return "create", create.group(1).strip(" .\"")
+    complete = re.search(
+        r"\b(?:marque|mets)\s+(?:la\s+)?t[aâ]che\s+(.+?)\s+(?:comme\s+)?(?:faite|terminée|terminee)$",
+        clean,
+        re.IGNORECASE,
+    )
+    if complete:
+        return "complete", complete.group(1).strip(" .\"")
+    delete = re.search(
+        r"\b(?:supprime|efface)\s+(?:la\s+)?t[aâ]che\s+(.+)$",
+        clean,
+        re.IGNORECASE,
+    )
+    if delete:
+        return "delete", delete.group(1).strip(" .\"")
+    if re.search(
+        r"\b(?:quelles? sont|liste|lis|montre)(?:-moi)?\b.*\b(?:t[aâ]ches|choses à faire)\b",
+        clean,
+        re.IGNORECASE,
+    ):
+        return "list", None
+    return None
+
+
+async def _handle_voice_task_command(task_tool: object | None, text: str) -> str | None:
+    command = _task_command(text)
+    if command is None or task_tool is None:
+        return None
+    action, value = command
+    if action in ("create", "list"):
+        result = await task_tool.execute(action=action, **({"text": value} if value else {}))  # type: ignore[attr-defined]
+        return result.content
+
+    listed = await task_tool.execute(action="list")  # type: ignore[attr-defined]
+    target = (value or "").casefold()
+    task_id = None
+    for line in listed.content.splitlines():
+        match = re.search(r"^- \[[ x]\] (.+) \(id: ([^)]+)\)$", line)
+        if match and (target in match.group(1).casefold() or match.group(1).casefold() in target):
+            task_id = match.group(2)
+            break
+    if task_id is None:
+        return f"Tâche introuvable dans Soul : {value}."
+    result = await task_tool.execute(  # type: ignore[attr-defined]
+        action="update" if action == "complete" else "delete",
+        task_id=task_id,
+        **({"done": True} if action == "complete" else {}),
+    )
+    return result.content
+
+
 async def _load_voice_soul_context(soul_recall: object | None, text: str) -> str | None:
     """Recherche Soul avant le tour vocal, sans dépendre du function calling LLM."""
     if soul_recall is None or not text.strip():
@@ -390,6 +451,7 @@ class JarvisVoiceAgent(Agent):
         self._calendar_tool = direct_tools.get("list_calendar_events")
         self._gmail_tool = direct_tools.get("list_emails")
         self._soul_recall = direct_tools.get("soul_memory_search")
+        self._tasks_tool = direct_tools.get("soul_tasks")
 
     async def on_enter(self) -> None:
         _name = settings.display_name
@@ -415,7 +477,16 @@ class JarvisVoiceAgent(Agent):
         text = new_message.text_content or ""
         context_parts: list[str] = []
 
-        soul_context = await _load_voice_soul_context(self._soul_recall, text)
+        task_result = await _handle_voice_task_command(self._tasks_tool, text)
+        if task_result:
+            context_parts.append(
+                "## ACTION TÂCHES SOUL — DÉJÀ EXÉCUTÉE\n"
+                f"{task_result}\n"
+                "Confirme simplement ce résultat en une phrase. Ne demande ni date, ni projet, "
+                "ni précision supplémentaire."
+            )
+
+        soul_context = None if task_result else await _load_voice_soul_context(self._soul_recall, text)
         if soul_context:
             context_parts.append(soul_context)
 

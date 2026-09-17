@@ -392,6 +392,14 @@ class WorkerAgent:
 
             if self._docker:
                 await self._docker.stop()
+            released = self._store.release_worker_claims(project.id, self._worker_id)
+            if released:
+                logger.debug(
+                    "Worker claims released",
+                    project_id=project.id,
+                    worker_id=self._worker_id,
+                    count=released,
+                )
             self._store.save_project(project)
             self._push_update()
 

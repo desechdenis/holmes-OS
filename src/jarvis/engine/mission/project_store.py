@@ -150,6 +150,48 @@ class ProjectStore:
             claims.pop(step_id, None)
             claims_file.write_text(json.dumps(claims, indent=2), encoding="utf-8")
 
+    def release_worker_claims(self, project_id: str, worker_id: str) -> int:
+        """Libère tous les claims détenus par un worker terminé ou interrompu.
+
+        Les claims empêchent deux workers concurrents d'exécuter la même étape,
+        mais ils ne doivent pas survivre au worker qui les possède. Sans ce
+        nettoyage, un retry peut rester silencieusement bloqué sur une étape
+        pourtant remise à ``pending``.
+        """
+        claims_file = WORKSPACE_DIR / project_id / ".jarvis" / "step_claims.json"
+        lock_path = WORKSPACE_DIR / project_id / ".jarvis" / "claims.lock"
+        if not claims_file.exists():
+            return 0
+
+        with exclusive_file_lock(lock_path):
+            try:
+                claims: dict[str, str] = json.loads(claims_file.read_text(encoding="utf-8"))
+            except Exception:
+                collector.warning("JRV-MSN-002", "JRV-MSN-002")
+                claims = {}
+
+            kept = {step_id: owner for step_id, owner in claims.items() if owner != worker_id}
+            released = len(claims) - len(kept)
+            claims_file.write_text(json.dumps(kept, indent=2), encoding="utf-8")
+            return released
+
+    def clear_project_claims(self, project_id: str) -> int:
+        """Supprime les claims orphelins avant une reprise explicite du projet."""
+        claims_file = WORKSPACE_DIR / project_id / ".jarvis" / "step_claims.json"
+        lock_path = WORKSPACE_DIR / project_id / ".jarvis" / "claims.lock"
+        if not claims_file.exists():
+            return 0
+
+        with exclusive_file_lock(lock_path):
+            try:
+                claims = json.loads(claims_file.read_text(encoding="utf-8"))
+                count = len(claims) if isinstance(claims, dict) else 0
+            except Exception:
+                collector.warning("JRV-MSN-002", "JRV-MSN-002")
+                count = 0
+            claims_file.write_text("{}", encoding="utf-8")
+            return count
+
     # ── Pause / reprise budget ─────────────────────────────────────────────────
 
     def pause_for_budget(self, project: Project, current_step_id: str | None) -> None:

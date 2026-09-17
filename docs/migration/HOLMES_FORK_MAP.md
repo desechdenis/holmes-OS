@@ -61,7 +61,15 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 - Telegram autorisé explicitement en mode local.
 - Appels internes et requêtes navigateur de même origine authentifiés.
 - Interface Holmes accessible depuis Home Assistant sur le LAN.
-- Validation : 870 tests réussis, 1 ignoré ; 2 tests de port non exécutables dans
+- Mission Engine : critères de succès obligatoires, vérification en trois couches,
+  gouvernance risque/permission/budget et retry borné présents et testés.
+- Reprise de mission : les claims d'étapes sont désormais libérés à la fin du worker
+  et nettoyés avant retry/reprise, y compris après interruption brutale.
+- Initiatives : persistance multi-jours et restauration au redémarrage présentes ;
+  l'ancien endpoint d'approbation délègue désormais au seul exécuteur gouverné.
+- Un brouillon Gmail exige deux actions distinctes : préparation, puis confirmation
+  explicite dans Mission Control. Aucun envoi direct depuis l'ancien dashboard.
+- Validation : 873 tests réussis, 1 ignoré ; 2 tests de port non exécutables dans
   le bac à sable Codex car l'ouverture de sockets locaux y est interdite.
 
 ## Restant avant publication
@@ -73,3 +81,10 @@ cours d'adaptation. Le fork n'est pas encore prêt à être publié.
 5. Terminer le renommage externe Jarvis → Holmes sans casser le namespace Python.
 6. Reporter l'audio mobile à la phase finale : HA Assist pour le micro et le routage,
    Holmes pour le raisonnement, puis TTS Home Assistant vers la bonne cible.
+7. Ajouter une vraie récupération d'état des missions interrompues au démarrage :
+   détecter `running`/`waiting_approval`, les placer en pause sûre, puis proposer la
+   reprise dans Mission Control au lieu de dépendre d'un retry manuel.
+8. Remplacer l'inférence textuelle des sources d'initiative par une provenance
+   structurée issue des collecteurs, puis persister l'audit proactif sur disque.
+9. Relier la fin d'une mission lancée par une initiative à son statut (`done` ou
+   `failed`) afin d'éviter les initiatives durablement bloquées en `in_progress`.

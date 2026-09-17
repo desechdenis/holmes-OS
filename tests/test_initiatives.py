@@ -602,3 +602,22 @@ class TestNoAutoFire:
             assert "pending" in result["error"].lower() or "statut" in result["error"].lower()
         finally:
             _store_mod.INITIATIVES_DIR = orig_dir
+
+
+class TestLegacyApproveEndpoint:
+    @pytest.mark.asyncio
+    async def test_approve_delegates_to_governed_executor(self) -> None:
+        """L'ancien endpoint UI ne doit plus contenir de chemin d'envoi direct."""
+        from jarvis.interfaces.api.proactive import approve_initiative
+
+        executor = AsyncMock()
+        executor.run = AsyncMock(
+            return_value={"status": "draft_ready", "initiative_id": "init_safe"}
+        )
+        request = MagicMock()
+        request.app.state.initiative_executor = executor
+
+        result = await approve_initiative("init_safe", request)
+
+        executor.run.assert_awaited_once_with("init_safe")
+        assert result["status"] == "draft_ready"

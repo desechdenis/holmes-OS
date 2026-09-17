@@ -503,12 +503,15 @@
 
     // Actions
     const actSec = el("div", { class: "panel-section", style: { display: "flex", gap: "8px", marginTop: "8px" } });
-    const approveBtn = el("button", { class: "m-btn", text: raw.type === "draft_response" ? "📤 Préparer & envoyer" : "✓ Approuver" });
+    const approveBtn = el("button", { class: "m-btn", text: raw.type === "draft_response" ? "📝 Préparer le brouillon" : "✓ Approuver" });
     approveBtn.addEventListener("click", async () => {
       approveBtn.textContent = "…"; approveBtn.disabled = true;
       try {
-        await J.api.post("/api/initiatives/" + raw.id + "/approve");
-        J.notify({ kind: "success", text: "Initiative approuvée" });
+        const result = await J.api.post("/api/proactive/initiatives/" + raw.id + "/run");
+        const message = result.status === "draft_ready"
+          ? "Brouillon prêt — confirmation finale dans Mission Control"
+          : "Initiative prise en charge";
+        J.notify({ kind: "success", text: message });
         closePanel();
         if (_activePage === "apercu") renderApercu(); else renderInitiatives();
       } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); approveBtn.disabled = false; approveBtn.textContent = "Approuver"; }
@@ -580,8 +583,11 @@
   async function approveInit(id, btn) {
     btn.textContent = "…"; btn.disabled = true;
     try {
-      await J.api.post("/api/initiatives/" + id + "/approve");
-      J.notify({ kind: "success", text: "Initiative approuvée" });
+      const result = await J.api.post("/api/proactive/initiatives/" + id + "/run");
+      const message = result.status === "draft_ready"
+        ? "Brouillon prêt — confirmation finale dans Mission Control"
+        : "Initiative prise en charge";
+      J.notify({ kind: "success", text: message });
       renderInitiatives();
     } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); btn.textContent = "Approuver"; btn.disabled = false; }
   }

@@ -271,6 +271,45 @@ def test_release_step_claim_permet_re_claim() -> None:
             ps_mod.WORKSPACE_DIR = original
 
 
+def test_release_worker_claims_ne_libere_que_le_worker_cible() -> None:
+    """La fin d'un worker libère ses étapes sans toucher aux workers concurrents."""
+    import tempfile
+
+    import jarvis.engine.mission.project_store as store_module
+
+    with tempfile.TemporaryDirectory() as td:
+        original = store_module.WORKSPACE_DIR
+        store_module.WORKSPACE_DIR = Path(td)
+        try:
+            store = store_module.ProjectStore()
+            assert store.claim_step("proj_cleanup", "s1", "worker-old")
+            assert store.claim_step("proj_cleanup", "s2", "worker-other")
+
+            assert store.release_worker_claims("proj_cleanup", "worker-old") == 1
+            assert store.claim_step("proj_cleanup", "s1", "worker-new") is True
+            assert store.claim_step("proj_cleanup", "s2", "worker-new") is False
+        finally:
+            store_module.WORKSPACE_DIR = original
+
+
+def test_clear_project_claims_permet_reprise_apres_crash() -> None:
+    """Une reprise explicite peut nettoyer tous les claims laissés par un crash."""
+    import tempfile
+
+    import jarvis.engine.mission.project_store as store_module
+
+    with tempfile.TemporaryDirectory() as td:
+        original = store_module.WORKSPACE_DIR
+        store_module.WORKSPACE_DIR = Path(td)
+        try:
+            store = store_module.ProjectStore()
+            assert store.claim_step("proj_restart", "s1", "worker-dead")
+            assert store.clear_project_claims("proj_restart") == 1
+            assert store.claim_step("proj_restart", "s1", "worker-restarted") is True
+        finally:
+            store_module.WORKSPACE_DIR = original
+
+
 # ── Tests pause / reprise budget ─────────────────────────────────────────────
 
 

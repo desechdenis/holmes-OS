@@ -4,19 +4,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, Query, Request
-from loguru import logger as _log
 from pydantic import BaseModel
 
-from jarvis.capabilities.tools.gmail import send_gmail_draft
 from jarvis.engine.proactive.initiative_generator import InitiativeGenerator
-from jarvis.engine.proactive.schemas import InitiativeType
 from jarvis.engine.proactive.store import InitiativeStore
-from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.http_errors import raise_api_error
-from jarvis.kernel.settings import settings as _s
 
 router = APIRouter()
 
@@ -72,49 +65,15 @@ async def get_initiatives() -> list[dict]:
 
 @router.post("/api/initiatives/{initiative_id}/approve")
 async def approve_initiative(initiative_id: str, request: Request) -> dict:
-    import asyncio
+    """Compatibilité UI historique, déléguée au seul exécuteur gouverné.
 
-    store = InitiativeStore()
-    init = store.get_by_id(initiative_id)
-    if not init:
-        raise_api_error("JRV-API-003", 404, "Initiative introuvable")
-
-    result: dict = {"status": "approved", "type": str(init.type)}
-
-    try:
-        if init.type == InitiativeType.DRAFT_RESPONSE:
-            msg_id = await send_gmail_draft(
-                draft_content=init.draft_content or "",
-                credentials_path=Path(_s.google_credentials_path),
-                token_path=Path(_s.google_token_path).parent / "google_gmail_token.json",
-            )
-            result["message_id"] = msg_id
-            _to = init.draft_content[:40] if init.draft_content else ""
-            _log.info(f"Initiative {initiative_id}: email envoyé", to=_to)
-
-        elif init.type == InitiativeType.AUTO_TASK:
-            orchestrator = getattr(request.app.state, "orchestrator", None)
-            if orchestrator:
-                mission = init.mission_description or init.action
-                asyncio.create_task(
-                    orchestrator.create_and_run(mission),
-                    name=f"initiative-{initiative_id[:8]}",
-                )
-                result["mission_launched"] = True
-                _log.info(f"Initiative {initiative_id}: mission lancée", mission=mission[:60])
-            else:
-                result["warning"] = "Orchestrateur non disponible"
-
-        else:
-            _log.info(f"Initiative {initiative_id} approuvée", type=init.type, title=init.title)
-
-    except Exception as e:
-        collector.error("JRV-API-001", "JRV-API-001", cause=e)
-        _log.error(f"Initiative approve error ({init.type}): {e}")
-        result["error"] = str(e)
-
-    store.update_status(initiative_id, "approved")
-    return result
+    Un brouillon d'e-mail passe donc à ``awaiting_confirm`` et ne peut plus être
+    envoyé directement par cet ancien endpoint.
+    """
+    executor = getattr(request.app.state, "initiative_executor", None)
+    if not executor:
+        raise_api_error("JRV-API-005", 503, "InitiativeExecutor non disponible")
+    return await executor.run(initiative_id)
 
 
 @router.post("/api/initiatives/{initiative_id}/reject")

@@ -140,6 +140,10 @@ class ProjectOrchestrator:
         if not project:
             return None
 
+        # Le worker précédent peut avoir été interrompu brutalement. Ses claims
+        # persistants ne doivent jamais empêcher le worker de retry de progresser.
+        self._store.clear_project_claims(project_id)
+
         # Remettre les étapes "running", "failed" (et "pending" déjà ok) en pending
         reset = False
         for step in project.steps:
@@ -200,6 +204,8 @@ class ProjectOrchestrator:
         if not self._store.is_resumable(project):
             logger.warning("Projet non reprennable", id=project_id, status=project.status)
             return None
+
+        self._store.clear_project_claims(project_id)
 
         project.status = ProjectStatus.RUNNING
         self._store.save_project(project)

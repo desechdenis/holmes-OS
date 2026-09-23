@@ -47,7 +47,7 @@ global couvrant le serveur, le navigateur et les scripts.
 
 | Système visé | Lecture | Écriture ou effet | Activation `.env` | Coupure |
 | --- | --- | --- | --- | --- |
-| Home Assistant | `GET /api/states`, puis filtrage local des états et attributs utiles | aucune : aucun appel de service et aucun verbe d'écriture n'est présent dans les deux adaptateurs HA | `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN` | retirer le jeton ou vider sa valeur, puis redémarrer Holmes ; l'adaptateur n'est construit que si le jeton est présent |
+| Home Assistant | `GET /api/states`, puis filtrage local des états configurés ; réponses de `weather.get_forecasts` et `calendar.get_events` | appels `POST` aux deux services de lecture pour demander leur réponse ; aucune commande d'équipement | `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN`, `HOME_ASSISTANT_MODE_ENTITY`, `HOME_ASSISTANT_PRESENCE_ENTITIES`, `HOME_ASSISTANT_WEATHER_ENTITY`, `HOME_ASSISTANT_CALENDAR_ENTITIES` | retirer le jeton ou vider sa valeur, puis redémarrer Holmes ; l'adaptateur n'est construit que si le jeton est présent |
 | Soul MCP — lecture | initialisation MCP, `search_notes`, `read_note` pour le rappel et la liste de tâches | aucune sur ces chemins | `SOUL_MCP_URL`, `SOUL_PROJECT` | vider `SOUL_MCP_URL` puis redémarrer Holmes ; aucun client Soul n'est alors construit |
 | Soul MCP — événements | aucune lecture métier | `SoulMemoryStore.append_event()` appelle `write_note` dans `holmes/events`, sans écrasement | même activation Soul | ce chemin n'a actuellement aucun appelant automatique dans `src/jarvis` : consolidation et collecteur HA ont été débranchés en phase 0. Couper Soul globalement avec `SOUL_MCP_URL`; conserver cette absence d'appelant comme invariant |
 | Soul MCP — tâches | `read_note` sur la note de tâches | `SoulTaskStore._write_unlocked()` appelle `write_note` avec écrasement après création, modification, clôture ou suppression d'une tâche | même activation Soul | vider `SOUL_MCP_URL`; les écritures sont déclenchées explicitement par une commande de tâche, les routes tâches du dashboard, ou l'action explicite « initiative vers tâche » |
@@ -60,6 +60,19 @@ Les deux seuls appels `write_note` de `providers/memory/soul.py` sont donc :
    déclencheur automatique dans le code de production ;
 2. `_write_unlocked` : réécriture de la note canonique de tâches après une
    mutation demandée explicitement.
+
+### Liste blanche Home Assistant
+
+Holmes refuse par le code tout service HA absent de cette liste fermée :
+
+- `weather.get_forecasts`, limité à l'entité météo configurée ;
+- `calendar.get_events`, limité aux entités calendrier configurées.
+
+Ces services utilisent HTTP `POST` parce que l'API Home Assistant exige un appel
+de service avec `return_response`, mais leur effet métier est une lecture. Les
+identifiants d'entités restent dans la configuration privée et aucune valeur
+réelle n'est publiée dans ce dépôt. Un service de lumière, serrure, alarme,
+climatisation ou tout autre domaine est refusé avant toute requête réseau.
 
 ## Conversation Home Assistant vers Holmes
 

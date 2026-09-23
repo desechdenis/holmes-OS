@@ -16,6 +16,10 @@ systèmes existants.
 - Holmes ne crée aucune dépendance dans les automatisations domestiques.
 - L'état domestique est en lecture seule. Aucune commande physique n'est déduite
   ou exécutée implicitement à partir d'une conversation.
+- Les seuls services Home Assistant appelables par Holmes sont la liste blanche
+  de lecture fermée `weather.get_forecasts` et `calendar.get_events`. Tout autre
+  service, notamment toute commande d'équipement, est refusé par le code avant
+  l'appel réseau.
 - Une donnée produite ou déduite par un modèle n'est jamais promue
   automatiquement en vérité canonique.
 - Les écritures automatiques destinées à la mémoire canonique restent des

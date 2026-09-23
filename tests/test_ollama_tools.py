@@ -99,9 +99,10 @@ def test_recovers_gemma_textual_write_file_call() -> None:
 def test_recovers_gemma_textual_list_files_call() -> None:
     from jarvis.providers.llm.local import _parse_text_tool_call
 
-    assert _parse_text_tool_call(
-        "list_files(directory='input/holmes-os/')", {"list_files"}
-    ) == ("list_files", {"directory": "input/holmes-os/"})
+    assert _parse_text_tool_call("list_files(directory='input/holmes-os/')", {"list_files"}) == (
+        "list_files",
+        {"directory": "input/holmes-os/"},
+    )
 
     assert _parse_text_tool_call(
         'list_files{directory:<|"|>input/holmes-os/modules/<|"|>}<tool_call|>',
@@ -146,6 +147,16 @@ def test_payload_no_tools_key_when_none() -> None:
         stream=False,
         tools=None,
     )
+    assert "tools" not in payload
+
+
+def test_ha_payload_caps_spoken_response_tokens() -> None:
+    from jarvis.providers.llm.local import OllamaProvider
+
+    provider = OllamaProvider()
+    payload = provider._payload([], "# Holmes — conversation Home Assistant\nRègles stables", True)
+
+    assert payload["options"]["num_predict"] == 32
     assert "tools" not in payload
 
 

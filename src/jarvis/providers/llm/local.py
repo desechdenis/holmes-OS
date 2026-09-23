@@ -112,6 +112,8 @@ class OllamaProvider(LLMProvider):
             # dégradait la restitution de faits récupérés depuis Soul.
             "options": {"temperature": 0.1},
         }
+        if system.startswith("# Holmes — conversation Home Assistant"):
+            payload["options"]["num_predict"] = 32
         if tools:
             payload["tools"] = _claude_tools_to_ollama(tools)
         return payload

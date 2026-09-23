@@ -14,9 +14,7 @@ class FakeAgent:
     def __init__(self) -> None:
         self.contexts: list[str | None] = []
 
-    def start_routing_stream(
-        self, **kwargs: object
-    ) -> tuple[AsyncIterator[str], None]:
+    def start_routing_stream(self, **kwargs: object) -> tuple[AsyncIterator[str], None]:
         summary = kwargs.get("recall_summary")
         self.contexts.append(summary if isinstance(summary, str) else None)
         return _response_stream(), None
@@ -43,6 +41,9 @@ class DirectSoulRecall(FakeSoulRecall):
 
 
 class FakeHomeState:
+    async def ambient_context(self) -> str:
+        return "## Contexte ambiant\n- Mode maison : présent"
+
     async def lookup(self, query: str, limit: int = 6) -> str:
         return "## État Home Assistant en direct\n- Température Salon : 21 °C"
 
@@ -155,6 +156,23 @@ async def test_gateway_injects_read_only_home_assistant_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_voice_gateway_injects_ambient_home_context_on_every_turn() -> None:
+    agent = FakeAgent()
+    gateway = Gateway(
+        session_manager=SessionManager(),
+        agent=agent,  # type: ignore[arg-type]
+        notifications=NotificationQueue(),
+        worker=BackgroundWorker(llm=object(), notifications=NotificationQueue()),  # type: ignore[arg-type]
+        home_state=FakeHomeState(),  # type: ignore[arg-type]
+    )
+
+    await gateway.handle("Bonjour [voix]")
+
+    assert agent.contexts
+    assert "## Contexte ambiant\n- Mode maison : présent" in (agent.contexts[0] or "")
+
+
+@pytest.mark.asyncio
 async def test_gateway_reads_live_calendar_before_using_memory_or_llm() -> None:
     agent = FakeAgent()
     gateway = Gateway(
@@ -258,9 +276,7 @@ async def test_gateway_prepares_then_starts_voice_mission_without_soul_or_llm() 
     assert soul.queries == []
     assert agent.contexts == []
 
-    _, route, response = await gateway.handle(
-        "Lancer le plan [voix]", session_id=str(session.id)
-    )
+    _, route, response = await gateway.handle("Lancer le plan [voix]", session_id=str(session.id))
 
     assert route.value == "I"
     assert response == "Mission lancée : Audit Holmes OS."

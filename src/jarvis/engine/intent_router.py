@@ -19,6 +19,7 @@ from jarvis.kernel.intents import (
     ActionResult,
     ActionStatus,
     Evidence,
+    IntentChannel,
     IntentKind,
     IntentRequest,
 )
@@ -156,6 +157,27 @@ class DeterministicIntentRouter:
                 )
 
         recall_summary: str | None = None
+        if self._home_state is not None and request.channel in {
+            IntentChannel.VOICE_HTTP,
+            IntentChannel.VOICE_LIVEKIT,
+        }:
+            ambient_context = getattr(self._home_state, "ambient_context", None)
+            if callable(ambient_context):
+                try:
+                    ambient = await ambient_context()
+                    if ambient:
+                        evidence.append(
+                            Evidence(
+                                source="home_assistant_ambient",
+                                content=ambient,
+                                expires_at=datetime.now(UTC) + timedelta(seconds=30),
+                                authoritative=True,
+                            )
+                        )
+                except Exception as exc:  # noqa: BLE001 — HA ne coupe pas le dialogue
+                    collector.warning("JRV-GWY-001", "JRV-GWY-001", cause=exc)
+                    logger.warning("Home Assistant ambient context failed", error=str(exc))
+
         allow_recall = bool(request.metadata.get("allow_recall", True))
         recall_each_turn = bool(getattr(self._recall, "always_recall", False))
         if self._recall is not None and (allow_recall or recall_each_turn):

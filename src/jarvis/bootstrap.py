@@ -252,7 +252,16 @@ def build(
     )
     ha_token = settings.home_assistant_token.get_secret_value()
     home_state_reader = (
-        HomeAssistantStateReader(settings.home_assistant_url, ha_token) if ha_token else None
+        HomeAssistantStateReader(
+            settings.home_assistant_url,
+            ha_token,
+            mode_entity=settings.home_assistant_mode_entity,
+            presence_entities=settings.home_assistant_presence_entities,
+            weather_entity=settings.home_assistant_weather_entity,
+            calendar_entities=settings.home_assistant_calendar_entities,
+        )
+        if ha_token
+        else None
     )
 
     # ── 4. Engine L2 — UsageTracker (créé tôt pour injection dans les providers) ─

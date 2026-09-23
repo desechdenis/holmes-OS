@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -40,14 +41,96 @@ class HomeAssistantStateReader:
     )
     _IGNORED_WORDS = frozenset(
         {
-            "dans", "de", "des", "du", "est", "et", "il", "la", "le", "les", "maison",
-            "me", "moi", "pour", "quel", "quelle", "quoi", "sais", "sur", "tu", "une",
+            "dans",
+            "de",
+            "des",
+            "du",
+            "est",
+            "et",
+            "il",
+            "la",
+            "le",
+            "les",
+            "maison",
+            "me",
+            "moi",
+            "pour",
+            "quel",
+            "quelle",
+            "quoi",
+            "sais",
+            "sur",
+            "tu",
+            "une",
         }
     )
 
-    def __init__(self, base_url: str, token: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        mode_entity: str = "",
+        presence_entities: str = "",
+        weather_entity: str = "",
+        calendar_entities: str = "",
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
+        self._mode_entity = mode_entity.strip()
+        self._presence_entities = self._entity_list(presence_entities)
+        self._weather_entity = weather_entity.strip()
+        self._calendar_entities = self._entity_list(calendar_entities)
+
+    @staticmethod
+    def _entity_list(value: str) -> tuple[str, ...]:
+        return tuple(item.strip() for item in value.split(",") if item.strip())
+
+    async def _states(self) -> list[Mapping[str, Any]]:
+        headers = {"Authorization": f"Bearer {self._token}"}
+        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
+            response = await client.get(f"{self._base_url}/api/states")
+        response.raise_for_status()
+        states = response.json()
+        if not isinstance(states, list):
+            return []
+        return [state for state in states if isinstance(state, Mapping)]
+
+    async def ambient_context(self) -> str:
+        """Retourner quelques lignes de présent, sans inventer de valeur HA."""
+        local_now = datetime.now().astimezone()
+        lines = ["## Contexte ambiant", f"- Date locale : {local_now:%Y-%m-%d %H:%M}"]
+        configured = (
+            (self._mode_entity,)
+            + self._presence_entities
+            + ((self._weather_entity,) if self._weather_entity else ())
+        )
+        if not configured:
+            return "\n".join(lines)
+        try:
+            states = {str(item.get("entity_id", "")): item for item in await self._states()}
+        except (httpx.HTTPError, TimeoutError):
+            lines.append("- Home Assistant : indisponible")
+            return "\n".join(lines)
+
+        labels = [(self._mode_entity, "Mode maison")]
+        labels.extend((entity_id, "Présence") for entity_id in self._presence_entities)
+        labels.append((self._weather_entity, "Météo actuelle"))
+        for entity_id, label in labels:
+            if not entity_id:
+                continue
+            state = states.get(entity_id)
+            if state is None:
+                continue
+            attrs = state.get("attributes", {})
+            attrs = attrs if isinstance(attrs, Mapping) else {}
+            name = str(attrs.get("friendly_name") or label)
+            value = str(state.get("state", "inconnu"))
+            if entity_id == self._weather_entity and attrs.get("temperature") is not None:
+                unit = str(attrs.get("temperature_unit") or "")
+                value = f"{value}, {attrs['temperature']} {unit}".strip()
+            lines.append(f"- {name} : {value}")
+        return "\n".join(lines)
 
     @classmethod
     def is_relevant(cls, query: str) -> bool:
@@ -58,13 +141,7 @@ class HomeAssistantStateReader:
         if not self.is_relevant(query):
             return None
 
-        headers = {"Authorization": f"Bearer {self._token}"}
-        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
-            response = await client.get(f"{self._base_url}/api/states")
-        response.raise_for_status()
-        states = response.json()
-        if not isinstance(states, list):
-            return None
+        states = await self._states()
 
         query_words = self._query_words(query)
         matches = sorted(

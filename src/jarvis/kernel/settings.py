@@ -402,6 +402,18 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="Token d'accès longue durée Home Assistant.",
     )
+    home_assistant_mode_entity: str = Field(
+        default="", description="Entité HA décrivant le mode courant de la maison."
+    )
+    home_assistant_presence_entities: str = Field(
+        default="", description="Entités HA de présence, séparées par des virgules."
+    )
+    home_assistant_weather_entity: str = Field(
+        default="", description="Entité météo HA utilisée pour le présent et les prévisions."
+    )
+    home_assistant_calendar_entities: str = Field(
+        default="", description="Entités calendrier HA, séparées par des virgules."
+    )
 
     # ── Soul / mémoire canonique Holmes ──────────────────────
     soul_mcp_url: str = Field(

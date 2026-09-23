@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from time import perf_counter
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -61,18 +62,19 @@ async def conversation(body: ConversationRequest, request: Request) -> Conversat
                 raise RuntimeError("voice gateway returned a stream for a non-streaming request")
             result = ConversationResponse(response=response, conversation_id=str(session.id))
         total_ms = (perf_counter() - metrics.started_at) * 1000
-        logger.bind(
-            event="ha_conversation_timing",
-            conversation_id=str(session.id),
-            total_ms=round(total_ms, 2),
-            ha_context_ms=round(metrics.stages_ms.get("ha_context", 0.0), 2),
-            soul_ms=round(metrics.stages_ms.get("soul", 0.0), 2),
-            prompt_build_ms=round(metrics.stages_ms.get("prompt_build", 0.0), 2),
-            ollama_ms=round(metrics.stages_ms.get("ollama", 0.0), 2),
-            postprocess_ms=round(metrics.stages_ms.get("postprocess", 0.0), 2),
-            prompt_tokens=metrics.prompt_tokens,
-            response_tokens=metrics.response_tokens,
-        ).info("HA conversation timing")
+        timing = {
+            "event": "ha_conversation_timing",
+            "conversation_id": str(session.id),
+            "total_ms": round(total_ms, 2),
+            "ha_context_ms": round(metrics.stages_ms.get("ha_context", 0.0), 2),
+            "soul_ms": round(metrics.stages_ms.get("soul", 0.0), 2),
+            "prompt_build_ms": round(metrics.stages_ms.get("prompt_build", 0.0), 2),
+            "ollama_ms": round(metrics.stages_ms.get("ollama", 0.0), 2),
+            "postprocess_ms": round(metrics.stages_ms.get("postprocess", 0.0), 2),
+            "prompt_tokens": metrics.prompt_tokens,
+            "response_tokens": metrics.response_tokens,
+        }
+        logger.info("HA_CONVERSATION_TIMING {}", json.dumps(timing, sort_keys=True))
         return result
     finally:
         end_metrics(token)

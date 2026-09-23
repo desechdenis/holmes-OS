@@ -1,8 +1,9 @@
 # Holmes OS — inventaire des contacts sortants
 
 **Périmètre :** appels initiés par le dépôt Holmes OS à l'exécution, dans
-l'interface web ou par un outil d'installation. Les raccordements gérés côté
-Body sont documentés séparément et ne figurent pas ici.
+l'interface web ou par un outil d'installation. L'état et l'exploitation des
+systèmes Body sont documentés séparément ; leurs appels depuis Holmes figurent
+bien ici.
 
 Cet inventaire décrit le code présent, y compris les fonctions héritées ou
 désactivées par défaut. Une clé absente empêche souvent l'appel concerné, mais
@@ -17,7 +18,7 @@ global couvrant le serveur, le navigateur et les scripts.
 | OpenAI | prompts/réponses ; audio si STT/TTS ; images si vision | consommation API et envoi de contenu | `API_BACKEND=openai`, `OPENAI_API_KEY`, ou fournisseur STT/TTS/vision correspondant | choisir un fournisseur local et retirer la clé |
 | Mistral | prompts, historique et réponses | consommation API | `LLM_PROVIDER=api`, `API_BACKEND=mistral`, `MISTRAL_API_KEY` | `LLM_PROVIDER=local` et retrait de la clé |
 | Gemini / Google AI | prompts/réponses et audio TTS | consommation API et envoi de contenu | `API_BACKEND=gemini`, `GEMINI_API_KEY`; TTS via `TTS_PROVIDER=gemini`, `GOOGLE_API_KEY` | choisir un fournisseur local et retirer les clés |
-| Ollama | prompts, historique, réponses et appels d'outils | requêtes vers le serveur configuré | `LLM_PROVIDER=local`, `OLLAMA_BASE_URL` | arrêter Ollama ou Holmes ; aucune valeur vide fiable n'est prévue |
+| Ollama | prompts, historique, réponses et appels d'outils | requêtes vers le serveur configuré | `LLM_PROVIDER=local`, `OLLAMA_BASE_URL` | arrêter Holmes ; Ollama est un moteur partagé et ne doit pas être arrêté par la procédure Holmes |
 | Deepgram | flux audio STT et transcription | envoi audio | `STT_PROVIDER=deepgram`, `DEEPGRAM_API_KEY` | `STT_PROVIDER=whisper` et retrait de la clé |
 | Google Speech | flux audio STT et transcription | envoi audio | `STT_PROVIDER=google`, `GOOGLE_APPLICATION_CREDENTIALS` | `STT_PROVIDER=whisper` et retrait du fichier de credentials |
 | ElevenLabs | texte TTS, voix disponibles et audio généré | envoi de texte et consommation API | `TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY` | `TTS_PROVIDER=piper` et retrait de la clé |
@@ -41,6 +42,24 @@ global couvrant le serveur, le navigateur et les scripts.
 | OpenSky et Nominatim | positions aériennes et géocodage | aucune écriture | routes Globe/carte invoquées ; pas de clé | ne pas ouvrir ces vues ou retirer les outils ; aucun flag dédié commun |
 | Mapbox / MapTiler | cartes, styles et tuiles | télémétrie et consommation côté navigateur possibles | `MAPBOX_TOKEN`, `MAPTILER_KEY` | retirer les clés et ne pas ouvrir les vues cartographiques |
 | AISStream | flux de positions publiques | abonnement au flux | `AISSTREAM_KEY` | retirer la clé |
+
+## Systèmes Body appelés par Holmes
+
+| Système visé | Lecture | Écriture ou effet | Activation `.env` | Coupure |
+| --- | --- | --- | --- | --- |
+| Home Assistant | `GET /api/states`, puis filtrage local des états et attributs utiles | aucune : aucun appel de service et aucun verbe d'écriture n'est présent dans les deux adaptateurs HA | `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN` | retirer le jeton ou vider sa valeur, puis redémarrer Holmes ; l'adaptateur n'est construit que si le jeton est présent |
+| Soul MCP — lecture | initialisation MCP, `search_notes`, `read_note` pour le rappel et la liste de tâches | aucune sur ces chemins | `SOUL_MCP_URL`, `SOUL_PROJECT` | vider `SOUL_MCP_URL` puis redémarrer Holmes ; aucun client Soul n'est alors construit |
+| Soul MCP — événements | aucune lecture métier | `SoulMemoryStore.append_event()` appelle `write_note` dans `holmes/events`, sans écrasement | même activation Soul | ce chemin n'a actuellement aucun appelant automatique dans `src/jarvis` : consolidation et collecteur HA ont été débranchés en phase 0. Couper Soul globalement avec `SOUL_MCP_URL`; conserver cette absence d'appelant comme invariant |
+| Soul MCP — tâches | `read_note` sur la note de tâches | `SoulTaskStore._write_unlocked()` appelle `write_note` avec écrasement après création, modification, clôture ou suppression d'une tâche | même activation Soul | vider `SOUL_MCP_URL`; les écritures sont déclenchées explicitement par une commande de tâche, les routes tâches du dashboard, ou l'action explicite « initiative vers tâche » |
+
+Le transport Soul utilise HTTP POST pour le protocole MCP, y compris pour les
+outils de lecture ; le caractère lecture/écriture dépend du nom d'outil MCP.
+Les deux seuls appels `write_note` de `providers/memory/soul.py` sont donc :
+
+1. `append_event` : capacité d'écriture d'événement aujourd'hui dormante, sans
+   déclencheur automatique dans le code de production ;
+2. `_write_unlocked` : réécriture de la note canonique de tâches après une
+   mutation demandée explicitement.
 
 ## Canaux de messagerie
 

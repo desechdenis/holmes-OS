@@ -66,6 +66,13 @@ def test_voice_parses_direct_task_commands() -> None:
         "create",
         "appeler le médecin",
     )
+    assert _task_command("ajoute bien dormir a ma liste de taches [voix]") == (
+        "create",
+        "bien dormir",
+    )
+    assert _task_command(
+        "« Ajoute acheter du pain à ma liste de tâches. » [voix]"
+    ) == ("create", "acheter du pain")
 
 
 class FakeTaskTool:

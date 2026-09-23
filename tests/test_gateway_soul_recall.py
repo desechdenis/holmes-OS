@@ -74,6 +74,24 @@ class FakeTaskTool:
         return ToolResult("Tâche ajoutée dans Soul : aller dormir (id: task_test)")
 
 
+class FakeMissionOrchestrator:
+    def __init__(self) -> None:
+        self.prepared: list[str] = []
+        self.started: list[str] = []
+
+    async def create_plan(self, mission: str):  # noqa: ANN201
+        self.prepared.append(mission)
+        return type(
+            "Project",
+            (),
+            {"id": "mission_test", "title": "Audit Holmes OS", "steps": [1, 2, 3]},
+        )()
+
+    def start_project(self, project_id: str):  # noqa: ANN201
+        self.started.append(project_id)
+        return type("Project", (), {"id": project_id, "title": "Audit Holmes OS"})()
+
+
 @pytest.mark.asyncio
 async def test_gateway_queries_soul_for_each_message_in_a_session() -> None:
     agent = FakeAgent()
@@ -213,3 +231,54 @@ async def test_gateway_never_confirms_a_failed_task_write() -> None:
     _, _, response = await gateway.handle("ajoute aller dormir")
 
     assert response == "Je n'ai pas modifié la liste. Soul indisponible"
+
+
+@pytest.mark.asyncio
+async def test_gateway_prepares_then_starts_voice_mission_without_soul_or_llm() -> None:
+    agent = FakeAgent()
+    soul = FakeSoulRecall()
+    orchestrator = FakeMissionOrchestrator()
+    gateway = Gateway(
+        session_manager=SessionManager(),
+        agent=agent,  # type: ignore[arg-type]
+        notifications=NotificationQueue(),
+        worker=BackgroundWorker(llm=object(), notifications=NotificationQueue()),  # type: ignore[arg-type]
+        recall=soul,  # type: ignore[arg-type]
+        orchestrator=orchestrator,
+    )
+
+    session, route, response = await gateway.handle(
+        "« Prépare une mission pour analyser l’état de Holmes OS. » [voix]"
+    )
+
+    assert route.value == "I"
+    assert orchestrator.prepared == ["analyser l’état de Holmes OS"]
+    assert "Plan prêt : Audit Holmes OS, 3 étapes" in str(response)
+    assert "Je ne l'ai pas lancé" in str(response)
+    assert soul.queries == []
+    assert agent.contexts == []
+
+    _, route, response = await gateway.handle(
+        "Lancer le plan [voix]", session_id=str(session.id)
+    )
+
+    assert route.value == "I"
+    assert response == "Mission lancée : Audit Holmes OS."
+    assert orchestrator.started == ["mission_test"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_refuses_ambiguous_start_without_pending_plan() -> None:
+    orchestrator = FakeMissionOrchestrator()
+    gateway = Gateway(
+        session_manager=SessionManager(),
+        agent=FakeAgent(),  # type: ignore[arg-type]
+        notifications=NotificationQueue(),
+        worker=BackgroundWorker(llm=object(), notifications=NotificationQueue()),  # type: ignore[arg-type]
+        orchestrator=orchestrator,
+    )
+
+    _, _, response = await gateway.handle("fais le [voix]")
+
+    assert response == "Aucun plan n'attend de validation dans cette conversation."
+    assert orchestrator.started == []

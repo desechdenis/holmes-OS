@@ -40,6 +40,7 @@ from livekit.plugins.google.beta import gemini_tts
 from jarvis.bootstrap import build
 from jarvis.capabilities.skills.registry import SkillRegistry
 from jarvis.capabilities.tools.tasks import execute_task_command, parse_task_command
+from jarvis.engine.intent_router import is_live_calendar_request as _is_live_calendar_request
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.paths import PROJECT_ROOT  # noqa: E402
 from jarvis.kernel.settings import settings
@@ -70,6 +71,7 @@ except Exception:
 logger = logging.getLogger("jarvis-voice")
 
 # ─── Prompt système vocal (base) ───────────────────────────────────────────────
+
 
 def _voice_system_base(name: str, profile: str = "") -> str:
     """Prompt vocal de base, personnalisé au prénom + bio (omise si vide)."""
@@ -130,8 +132,18 @@ def _build_voice_instructions() -> str:
 
 _JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 _MOIS = [
-    "janvier", "février", "mars", "avril", "mai", "juin",
-    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
 ]
 
 
@@ -228,9 +240,7 @@ def _voice_broadcast(event: dict) -> None:
         headers = {"Content-Type": "application/json"}
         if settings.api_auth_enabled:
             headers["Authorization"] = f"Bearer {settings.api_token.get_secret_value()}"
-        req = urllib.request.Request(
-            url, data=data, headers=headers, method="POST"
-        )
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
             urllib.request.urlopen(req, timeout=2)
         except Exception as e:
@@ -282,9 +292,7 @@ class _ProxyMemoryTool:
             return ToolResult(content=content, is_error=is_error)
         except Exception as e:
             collector.error("JRV-VOI-001", "JRV-VOI-001", cause=e)
-            logger.warning(
-                "Proxy mémoire '%s' -> API injoignable (%s), repli local", self.name, e
-            )
+            logger.warning("Proxy mémoire '%s' -> API injoignable (%s), repli local", self.name, e)
             return await self._real.execute(**kwargs)  # type: ignore[attr-defined]
 
 
@@ -344,24 +352,6 @@ def _build_voice_tools() -> tuple[list, dict[str, object]]:
 # ─── Agent Jarvis ──────────────────────────────────────────────────────────────
 
 
-def _is_live_calendar_request(text: str) -> bool:
-    lowered = text.lower()
-    return any(
-        term in lowered
-        for term in (
-            "agenda",
-            "calendrier",
-            "calendar",
-            "rendez-vous",
-            "rendez vous",
-            "rdv",
-            "événement",
-            "evenement",
-            "planning",
-        )
-    )
-
-
 def _is_live_email_request(text: str) -> bool:
     lowered = text.lower()
     return any(term in lowered for term in ("e-mail", "email", "mail", "mails", "boîte"))
@@ -404,7 +394,8 @@ class JarvisVoiceAgent(Agent):
     async def on_enter(self) -> None:
         _name = settings.display_name
         _greeting = (
-            f"Systèmes en ligne. Bonjour {_name}." if settings.user_firstname.strip()
+            f"Systèmes en ligne. Bonjour {_name}."
+            if settings.user_firstname.strip()
             else "Systèmes en ligne."
         )
         await self.session.say(
@@ -439,11 +430,11 @@ class JarvisVoiceAgent(Agent):
                     "Explique brièvement que l'action n'a pas été effectuée. "
                     "Ne dis jamais qu'elle a réussi."
                 )
-            context_parts.append(
-                f"## {task_heading}\n{task_result.content}\n{task_instruction}"
-            )
+            context_parts.append(f"## {task_heading}\n{task_result.content}\n{task_instruction}")
 
-        soul_context = None if task_result else await _load_voice_soul_context(self._soul_recall, text)
+        soul_context = (
+            None if task_result else await _load_voice_soul_context(self._soul_recall, text)
+        )
         if soul_context:
             context_parts.append(soul_context)
 

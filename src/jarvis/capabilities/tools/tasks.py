@@ -20,14 +20,16 @@ class TaskCommandOutcome:
 def parse_task_command(text: str) -> tuple[str, str | None] | None:
     """Extrait les commandes usuelles sans laisser le LLM prétendre les avoir exécutées."""
     clean = re.sub(r"\s*\[voix\]\s*$", "", text, flags=re.IGNORECASE).strip()
+    clean = clean.strip(' \t\r\n"“”«»')
+    clean = re.sub(r"[.!?…]+\s*[" + re.escape('"“”«»') + r"]?\s*$", "", clean).strip()
     create_patterns = (
         r"\b(?:ajoute|ajouter|crée|créer|note)\s+(?:la\s+|une\s+)?t[aâ]che\s*:?[\s\"]*(.+?)\"?$",
         r"\b(?:ajoute|ajouter|crée|créer|note|mets|mettre)\s+"
-        r"(?:à|dans|sur)\s+(?:ma|la|mes|les)?\s*"
+        r"(?:à|a|dans|sur)\s+(?:ma|la|mes|les)?\s*"
         r"(?:liste(?:\s+(?:de\s+)?(?:t[aâ]ches|choses\s+à\s+faire))?|choses\s+à\s+faire)"
         r"\s*:?[\s\"]*(.+?)\"?$",
         r"\b(?:ajoute|ajouter|crée|créer|note|mets|mettre)\s+(.+?)\s+"
-        r"(?:à|dans|sur)\s+(?:ma|la|mes|les)?\s*"
+        r"(?:à|a|dans|sur)\s+(?:ma|la|mes|les)?\s*"
         r"(?:liste(?:\s+(?:de\s+)?(?:t[aâ]ches|choses\s+à\s+faire))?|choses\s+à\s+faire)$",
         # Forme vocale courte : « ajoute aller dormir » / « ajoute sortir les poubelles ».
         r"\b(?:ajoute|ajouter|crée|créer|note)\s+"
@@ -42,7 +44,7 @@ def parse_task_command(text: str) -> tuple[str, str | None] | None:
                 "",
                 match.group(1),
                 flags=re.IGNORECASE,
-            ).strip(" .\"")
+            ).strip(' ."“”«»')
             return "create", value
 
     complete = re.search(

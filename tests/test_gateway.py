@@ -85,6 +85,16 @@ async def test_gateway_stream() -> None:
     assert "Bonjour" in full
 
 
+async def test_llm_cannot_create_mission_with_routing_tag() -> None:
+    gw, _ = _make_gateway("[BG:PROJECT] Je prépare une mission.")
+
+    _, route, response = await gw.handle(message="Parlons du projet", stream=False)
+
+    assert route is RouteEnum.INSTANT
+    assert isinstance(response, str)
+    assert "Je prépare une mission" in response
+
+
 async def test_gateway_fallback_on_error() -> None:
     class _BrokenLLM(_MockLLM):
         async def complete(self, **kwargs: object) -> str:  # type: ignore[override]

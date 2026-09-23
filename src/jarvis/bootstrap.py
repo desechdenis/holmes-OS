@@ -69,6 +69,7 @@ from jarvis.engine.background.scheduler import Scheduler
 from jarvis.engine.background.worker import BackgroundWorker
 from jarvis.engine.budget import BudgetGuard
 from jarvis.engine.gateway import Gateway
+from jarvis.engine.intent_router import DeterministicIntentRouter
 from jarvis.engine.mission.capability_engine import CapabilityEngine, Whitelist
 from jarvis.engine.mission.orchestrator import ProjectOrchestrator
 from jarvis.engine.mission.project_manager import ProjectManager
@@ -445,6 +446,15 @@ def build(
         budget_guard=budget,
         reflexion=reflexion,
         bus=bus,
+        legacy_local_enabled=settings.mission_legacy_local_enabled,
+    )
+
+    intent_router = DeterministicIntentRouter(
+        recall=soul_recall or cross_recall,
+        home_state=home_state_reader,
+        calendar=calendar_list_tool,
+        tasks=tasks_tool,
+        orchestrator=orchestrator,
     )
 
     # ── 13. Engine L2 — Gateway ────────────────────────────────────────────
@@ -458,6 +468,8 @@ def build(
         home_state=home_state_reader,
         calendar=calendar_list_tool,
         tasks=tasks_tool,
+        orchestrator=orchestrator,
+        intent_router=intent_router,
     )
     voice_gateway = Gateway(
         session_manager=session_manager,
@@ -468,6 +480,8 @@ def build(
         home_state=home_state_reader,
         calendar=calendar_list_tool,
         tasks=tasks_tool,
+        orchestrator=orchestrator,
+        intent_router=intent_router,
     )
 
     # ── 14. Engine L2 — Proactive (initiatives + curator + command center) ─

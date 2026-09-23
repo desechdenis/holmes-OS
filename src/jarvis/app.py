@@ -216,14 +216,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         container.scheduler.start_routines(
             _default_routines,
             _routine_store,
-            wake_engine=lambda: asyncio.create_task(
-                container.proactive_engine.run_now(), name="routine-wake-engine"
+            wake_engine=(
+                lambda: asyncio.create_task(
+                    container.proactive_engine.run_now(), name="routine-wake-engine"
+                )
+                if settings.proactive_llm_enabled
+                else None
             ),
         )
         app.state.routine_store = _routine_store
         logger.info("Routines moteur démarré")
 
-    asyncio.create_task(container.proactive_engine.start(), name="proactive-engine")
+    if settings.proactive_llm_enabled:
+        asyncio.create_task(container.proactive_engine.start(), name="proactive-engine")
+    else:
+        logger.info(
+            "Génération proactive par LLM désactivée ; store et interface conservés"
+        )
 
     # AnalyticsRegistry (charge la config sauvegardée)
 

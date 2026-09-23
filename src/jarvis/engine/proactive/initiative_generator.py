@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import datetime
 
 from loguru import logger
 
@@ -19,8 +20,8 @@ from jarvis.engine.proactive.schemas import ExecutionMode, Initiative, Initiativ
 from jarvis.kernel.contracts import LLMProvider
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 
-MAX_INITIATIVES = 5
-MAX_HIGH = 3
+MAX_INITIATIVES = 3
+MAX_HIGH = 1
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
@@ -125,7 +126,7 @@ def _apply_caps(items: list) -> list:
 # __NAME__ est substitué par le prénom configuré. Les accolades JSON sont littérales
 # (pas de .format) — on utilise .replace pour éviter tout conflit.
 _INITIATIVE_BODY = """
-Génère 5 initiatives MAX (2 HIGH max).
+Génère 3 initiatives MAX (1 HIGH max).
 Chaque champ est limité en longueur — RESPECTE ces limites absolues.
 
 TYPES : draft_response | reminder | suggestion | alert | auto_task | info
@@ -181,7 +182,7 @@ un rappel temporel imminent EST une action concrète (préparer / rejoindre).
 
 ## RÈGLES DE QUALITÉ
 
-1. Maximum 5 initiatives par cycle, maximum 2 HIGH
+1. Maximum 3 initiatives par cycle, maximum 1 HIGH
 2. Zéro doublon — si un sujet a été traité dans la journée, ne pas régénérer
 3. Une initiative doit déclencher une ACTION concrète de __NAME__ dans les 48h
    Si ce n'est pas le cas → c'est une observation, pas une initiative. Ne pas inclure.
@@ -202,6 +203,7 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans explication :
       "email_subject": "Sujet court ou null",
       "thread_id": "thread_id ou null",
       "mission_description": "60 chars max ou null",
+      "due_at": "échéance métier ISO 8601 ou null",
       "sources": ["noms exacts pris dans SOURCES DISPONIBLES"]
     }
   ]
@@ -210,7 +212,7 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans explication :
 
 def _initiative_system(name: str, profile: str = "") -> str:
     """Prompt système du moteur d'initiatives, personnalisé au prénom + bio."""
-    header = f"\nTu es le moteur d'analyse proactif de Jarvis, assistant personnel de {name}."
+    header = f"\nTu es le moteur d'analyse proactif de Holmes, assistant personnel de {name}."
     if profile.strip():
         header += f"\n{name} : {profile.strip()}"
     return header + "\n" + _INITIATIVE_BODY.replace("__NAME__", name)
@@ -262,7 +264,7 @@ class InitiativeGenerator:
         prompt = (
             f"État du monde de {self._name} :\n\n"
             f"{world_context}\n\n"
-            "Génère les 5 initiatives les plus pertinentes et urgentes (3 HIGH max)."
+            "Génère les 3 initiatives les plus pertinentes et urgentes (1 HIGH max)."
         )
 
         response = await self._llm.complete(
@@ -438,6 +440,11 @@ class InitiativeGenerator:
                         execution_mode=ExecutionMode(item.get("execution_mode", "notify")),
                         draft_content=None,  # généré séparément
                         mission_description=(item.get("mission_description") or None),
+                        due_at=(
+                            datetime.fromisoformat(str(item["due_at"]).replace("Z", "+00:00"))
+                            if item.get("due_at")
+                            else None
+                        ),
                         sources=sources,
                     )
                     # Stocker les champs email pour la génération du brouillon
@@ -462,7 +469,7 @@ class InitiativeGenerator:
             capped = _apply_caps(unique)
 
             logger.info(
-                "InitiativeGenerator: %d → %d (dédup) → %d (caps)",
+                "InitiativeGenerator: {} → {} (dédup) → {} (caps)",
                 len(initiatives),
                 len(unique),
                 len(capped),

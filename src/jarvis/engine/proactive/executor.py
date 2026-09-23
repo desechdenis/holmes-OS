@@ -42,7 +42,7 @@ SendGmailDraft = Callable[..., Awaitable[Any]]
 
 
 class _Orchestrator(Protocol):
-    async def create_and_run(self, mission: str) -> object: ...
+    async def create_plan(self, mission: str) -> object: ...
 
 
 class _ApprovalChecker(Protocol): ...
@@ -77,7 +77,7 @@ class InitiativeExecutor:
         """
         Déclenche l'exécution d'une initiative (étape 1).
         Pour DRAFT_RESPONSE : retourne le brouillon pour relecture (pas d'envoi).
-        Pour AUTO_TASK : lance la mission après vérification budget.
+        Pour AUTO_TASK : prépare le plan après vérification budget.
         Pour INFO/REMINDER/SUGGESTION : marque comme traitée.
         """
         init = self._store.get_by_id(initiative_id)
@@ -195,7 +195,7 @@ class InitiativeExecutor:
     # ── AUTO_TASK : mission agentique ─────────────────────────────────────────
 
     async def _launch_mission(self, init: Initiative) -> dict:
-        """Lance une mission via l'orchestrateur après réservation budget."""
+        """Prépare une mission sans l'exécuter, après réservation budget."""
         if not self._orchestrator:
             self._store.update_status(init.id, "failed")
             return {"error": "Orchestrateur non disponible", "status": "error"}
@@ -214,17 +214,17 @@ class InitiativeExecutor:
 
         mission = init.mission_description or init.action
         try:
-            project = await self._orchestrator.create_and_run(mission)
+            project = await self._orchestrator.create_plan(mission)
             self._store.update_initiative(
                 init.id,
                 {
-                    "status": "in_progress",
+                    "status": "awaiting_mission_confirm",
                     "mission_description": mission,
                     "project_id": project.id,
                 },
             )
             return {
-                "status": "mission_launched",
+                "status": "plan_ready",
                 "project_id": project.id,
                 "title": project.title,
                 "steps": len(project.steps),

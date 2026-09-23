@@ -151,6 +151,39 @@ def test_generator_keeps_only_sources_observed_by_collectors() -> None:
 
 
 class TestStoreMultiDay:
+    def test_actionable_queue_is_capped_and_expires_old_reminders(self, tmp_path: Path) -> None:
+        import jarvis.engine.proactive.store as _store_mod
+
+        orig_dir = _store_mod.INITIATIVES_DIR
+        _store_mod.INITIATIVES_DIR = tmp_path
+        try:
+            store = InitiativeStore()
+            today = datetime.now().strftime("%Y-%m-%d")
+            old = _make_initiative(
+                InitiativeType.REMINDER,
+                offset_days=3,
+                title="Rappel désormais périmé et sans échéance",
+            )
+            _write_initiative(tmp_path, old, today)
+            titles = [
+                "Réserver contrôle annuel chaudière",
+                "Préparer dossier scolaire rentrée",
+                "Comparer devis isolation grenier",
+                "Acheter alimentation chat vendredi",
+                "Vérifier sauvegarde serveur familial",
+            ]
+            for title in titles:
+                fresh = _make_initiative(title=title)
+                _write_initiative(tmp_path, fresh, today)
+
+            result = store.load_actionable(limit=3)
+
+            assert len(result) == 3
+            assert old.id not in {item.id for item in result}
+            assert store.get_by_id(old.id).status == "expired"
+        finally:
+            _store_mod.INITIATIVES_DIR = orig_dir
+
     def test_load_pending_all_reads_multiple_days(self, tmp_path: Path) -> None:
         """load_pending_all() doit trouver des initiatives datant de plusieurs jours."""
         import jarvis.engine.proactive.store as _store_mod
@@ -468,7 +501,7 @@ class TestExecutorDraftResponse:
 class TestExecutorMission:
     @pytest.mark.asyncio
     async def test_run_mission_reserves_budget(self, tmp_path: Path) -> None:
-        """run() AUTO_TASK doit appeler budget.reserve() avant de lancer la mission."""
+        """run() AUTO_TASK réserve le budget mais ne lance que la planification."""
         import jarvis.engine.proactive.store as _store_mod
 
         mock_project = MagicMock()
@@ -477,7 +510,7 @@ class TestExecutorMission:
         mock_project.steps = [MagicMock(), MagicMock()]
 
         mock_orch = AsyncMock()
-        mock_orch.create_and_run = AsyncMock(return_value=mock_project)
+        mock_orch.create_plan = AsyncMock(return_value=mock_project)
 
         mock_budget = AsyncMock()
         mock_budget.reserve = AsyncMock(return_value=True)
@@ -497,11 +530,12 @@ class TestExecutorMission:
             scope_arg = mock_budget.reserve.call_args[0][0]
             assert scope_arg.startswith("initiative:")
 
-            assert result["status"] == "mission_launched"
+            assert result["status"] == "plan_ready"
             assert result["project_id"] == "proj_abc"
             updated = store.get_by_id(init.id)
             assert updated is not None
             assert updated.project_id == "proj_abc"
+            assert updated.status == "awaiting_mission_confirm"
         finally:
             _store_mod.INITIATIVES_DIR = orig_dir
 
@@ -526,7 +560,7 @@ class TestExecutorMission:
 
             assert result["status"] == "budget_exceeded"
             # L'orchestrateur ne doit pas avoir été appelé
-            mock_orch.create_and_run.assert_not_called()
+            mock_orch.create_plan.assert_not_called()
 
             # L'initiative doit être en failed
             updated = store.get_by_id(init.id)

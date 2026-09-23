@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from jarvis.engine.proactive.schemas import ExecutionMode, Initiative, InitiativeType, Priority
@@ -43,6 +43,15 @@ def _shares_keyword(a: str, b: str, min_len: int = 7) -> bool:
 
 def _similar(a: str, b: str) -> bool:
     return _title_key(a) == _title_key(b) or _jaccard(a, b) >= 0.35 or _shares_keyword(a, b)
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
 
 
 def _dedup_initiatives(initiatives: list) -> list:
@@ -77,6 +86,7 @@ class InitiativeStore:
     def _parse_initiative(self, data: dict) -> Initiative:
         # PHASE 6 — nouveaux champs avec .get(...) defaults pour compat JSONL legacy.
         deadline_str = data.get("deadline")
+        due_at_str = data.get("due_at")
         raw_sources = data.get("sources", [])
         return Initiative(
             id=data["id"],
@@ -103,7 +113,9 @@ class InitiativeStore:
             permission_required=data.get("permission_required", "agent_mission"),
             cost_max_usd=data.get("cost_max_usd"),
             risk=data.get("risk", "low"),
-            deadline=datetime.fromisoformat(deadline_str) if deadline_str else None,
+            deadline=_parse_datetime(deadline_str),
+            due_at=_parse_datetime(due_at_str),
+            task_id=data.get("task_id"),
             next_action=data.get("next_action", ""),
             requires_validation=bool(data.get("requires_validation", False)),
         )
@@ -175,6 +187,8 @@ class InitiativeStore:
                         "deadline": (
                             initiative.deadline.isoformat() if initiative.deadline else None
                         ),
+                        "due_at": initiative.due_at.isoformat() if initiative.due_at else None,
+                        "task_id": initiative.task_id,
                         "next_action": initiative.next_action,
                         "requires_validation": initiative.requires_validation,
                     }
@@ -221,6 +235,42 @@ class InitiativeStore:
                     collector.warning("JRV-PRO-001", "JRV-PRO-001")
                     pass
         return _dedup_initiatives(all_initiatives)
+
+    def load_actionable(self, days: int = 7, limit: int = 3) -> list[Initiative]:
+        """Retourne une file courte, fraîche et priorisée pour arbitrage humain.
+
+        Les rappels sans échéance explicite expirent après 48 h. Une échéance
+        métier passée depuis plus de 12 h expire également. Les éléments expirés
+        restent dans le journal pour l'audit, mais ne polluent plus le tableau.
+        """
+        now = datetime.now()
+        active: list[Initiative] = []
+        candidates = _dedup_initiatives(
+            self.list_recent(days=days, statuses=["pending", "snoozed"])
+        )
+        for item in candidates:
+            if item.status == "snoozed":
+                if item.due_at and item.due_at > now:
+                    continue
+                self.update_status(item.id, "pending")
+                item.status = "pending"
+            stale = (
+                item.deadline is not None and item.deadline < now
+            ) or (
+                item.due_at is not None and item.due_at < now - timedelta(hours=12)
+            ) or (
+                item.type == InitiativeType.REMINDER
+                and item.due_at is None
+                and item.created_at < now - timedelta(hours=48)
+            )
+            if stale:
+                self.update_status(item.id, "expired")
+                continue
+            active.append(item)
+
+        rank = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+        active.sort(key=lambda i: (rank.get(i.priority, 9), i.due_at or i.created_at))
+        return active[: max(0, limit)]
 
     def list_recent(self, days: int = 7, statuses: list[str] | None = None) -> list[Initiative]:
         """Retourne les initiatives des N derniers jours filtrées par statut (tous si None)."""

@@ -81,6 +81,9 @@ class Settings(BaseSettings):
         description="URL du serveur Ollama.",
     )
     ollama_model: str = Field(default="mistral", description="Modèle Ollama à utiliser.")
+    ollama_keep_alive: str = Field(
+        default="30m", description="Durée de maintien du modèle Ollama en mémoire."
+    )
 
     # ── Serveur ───────────────────────────────────────────────
     host: str = Field(

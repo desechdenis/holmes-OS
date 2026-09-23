@@ -107,6 +107,7 @@ class OllamaProvider(LLMProvider):
             "messages": [{"role": "system", "content": system}, *messages],
             "stream": stream,
             "think": False,  # désactive le mode reasoning Qwen3 côté Ollama
+            "keep_alive": settings.ollama_keep_alive,
             # Gemma est livré avec une température de 0.1. La relever à 0.7
             # dégradait la restitution de faits récupérés depuis Soul.
             "options": {"temperature": 0.1},
@@ -225,6 +226,7 @@ class OllamaProvider(LLMProvider):
                 "messages": current,
                 "stream": False,
                 "think": False,
+                "keep_alive": settings.ollama_keep_alive,
                 "options": {"temperature": 0.1},
                 "tools": ollama_tools,
             }

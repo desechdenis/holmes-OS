@@ -56,6 +56,8 @@ async def conversation(body: ConversationRequest, request: Request) -> Conversat
             message=f"{body.text.strip()}\n[voix]",
             session_id=holmes_session_id(body.conversation_id),
             stream=False,
+            allow_tools=False,
+            ha_conversation=True,
         )
         with metric_stage("postprocess"):
             if not isinstance(response, str):

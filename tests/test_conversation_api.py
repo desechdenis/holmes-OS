@@ -32,7 +32,11 @@ async def test_conversation_nominal_response_uses_voice_profile() -> None:
     assert result.response == "Bref."
     assert result.conversation_id == str(session_id)
     gateway.handle.assert_awaited_once_with(
-        message="Quelle heure est-il ?\n[voix]", session_id=None, stream=False
+        message="Quelle heure est-il ?\n[voix]",
+        session_id=None,
+        stream=False,
+        allow_tools=False,
+        ha_conversation=True,
     )
 
 
@@ -41,7 +45,10 @@ async def test_conversation_id_keeps_the_same_persistent_session() -> None:
     sessions = SessionManager()
 
     async def handle(
-        message: str, session_id: str | None, stream: bool
+        message: str,
+        session_id: str | None,
+        stream: bool,
+        **_: object,
     ) -> tuple[Session, RouteEnum, str]:
         session = sessions.get_or_create(session_id)
         session.add_message("user", message)
@@ -69,7 +76,10 @@ async def test_ha_ulid_maps_to_one_session_even_when_ha_ignores_holmes_id() -> N
     histories_seen: list[list[str]] = []
 
     async def handle(
-        message: str, session_id: str | None, stream: bool
+        message: str,
+        session_id: str | None,
+        stream: bool,
+        **_: object,
     ) -> tuple[Session, RouteEnum, str]:
         session = sessions.get_or_create(session_id)
         histories_seen.append(

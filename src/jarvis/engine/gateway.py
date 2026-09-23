@@ -77,6 +77,8 @@ class Gateway:
         message: str,
         session_id: str | None = None,
         stream: bool = True,
+        allow_tools: bool = True,
+        ha_conversation: bool = False,
     ) -> tuple[Session, RouteEnum, str | AsyncIterator[str]]:
         session = self._sessions.get_or_create(session_id)
         request = IntentRequest(
@@ -118,6 +120,8 @@ class Gateway:
                 user_message=message,
                 notifications=notif_texts,
                 recall_summary=intent_result.context(),
+                allow_tools=allow_tools,
+                ha_conversation=ha_conversation,
             )
 
             route, text_stream = await SpeedRouter.extract_route(raw_stream)

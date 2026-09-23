@@ -26,6 +26,7 @@ from jarvis.kernel.settings import Settings
 
 _STATIC_PROMPT_PATH = PROMPTS_DIR / "system_static.md"
 _LOCAL_STATIC_PROMPT_PATH = PROMPTS_DIR / "system_holmes_local.md"
+_HA_STATIC_PROMPT_PATH = PROMPTS_DIR / "system_holmes_ha.md"
 _MAX_TOOL_RESULT_CHARS = 12_000
 _MAX_ACTIVE_SESSION_MESSAGES = 24
 
@@ -84,12 +85,16 @@ class Agent:
         self,
         notifications: list[str] | None = None,
         recall_summary: str | None = None,
+        ha_conversation: bool = False,
     ) -> str:
         """Assemble le prompt système : partie statique + contexte dynamique."""
         _s = self._settings
         is_local = _s.llm_provider == "local"
 
-        prompt_path = _LOCAL_STATIC_PROMPT_PATH if is_local else _STATIC_PROMPT_PATH
+        if ha_conversation:
+            prompt_path = _HA_STATIC_PROMPT_PATH
+        else:
+            prompt_path = _LOCAL_STATIC_PROMPT_PATH if is_local else _STATIC_PROMPT_PATH
         static_system = prompt_path.read_text(encoding="utf-8")
         # Le prompt statique est rédigé avec "Barth" comme nom par défaut ; on le
         # remplace par le prénom configuré (USER_FIRSTNAME) pour que l'assistant appelle
@@ -251,6 +256,8 @@ class Agent:
         user_message: str,
         notifications: list[str] | None = None,
         recall_summary: str | None = None,
+        allow_tools: bool = True,
+        ha_conversation: bool = False,
     ) -> tuple[AsyncIterator[str], ToolCapture | None]:
         """Un seul appel LLM streamé, avec outils si disponibles.
 
@@ -260,10 +267,14 @@ class Agent:
         """
         session.add_message("user", user_message)
         with metric_stage("prompt_build"):
-            system = self._build_system(notifications=notifications, recall_summary=recall_summary)
+            system = self._build_system(
+                notifications=notifications,
+                recall_summary=recall_summary,
+                ha_conversation=ha_conversation,
+            )
         logger.debug("Agent routing stream", session_id=str(session.id))
 
-        if self.has_tools() and hasattr(self._llm, "stream_with_capture"):
+        if allow_tools and self.has_tools() and hasattr(self._llm, "stream_with_capture"):
             stream, capture = self._llm.stream_with_capture(  # type: ignore[union-attr]
                 messages=_active_session_messages(session),
                 system=system,

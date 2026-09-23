@@ -90,6 +90,21 @@ def test_local_mode_uses_a_compact_holmes_prompt(local_mode: None) -> None:
     assert len(system) < 6_000
 
 
+def test_ha_conversation_uses_a_small_stable_prompt(local_mode: None) -> None:
+    from jarvis.kernel.settings import settings
+
+    agent = Agent(settings=settings, llm=_MockLLM())
+    first = agent._build_system(recall_summary="contexte A", ha_conversation=True)
+    second = agent._build_system(recall_summary="contexte B", ha_conversation=True)
+
+    assert "conversation Home Assistant" in first
+    assert len(first) < 2_000
+    assert (
+        first.split("=== CONTEXTE DYNAMIQUE ===", 1)[0]
+        == second.split("=== CONTEXTE DYNAMIQUE ===", 1)[0]
+    )
+
+
 def test_local_voice_profile_never_promises_persistent_memory(local_mode: None) -> None:
     from jarvis.kernel.settings import settings
 

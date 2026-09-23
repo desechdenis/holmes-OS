@@ -19,10 +19,38 @@ from jarvis.providers.llm.base import LLMProvider
 # Strip <think>...</think> au cas où Ollama les laisse passer (fallback)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _MAX_TOOL_ITERATIONS = 8
+_GEMMA_WRITE_CALL_RE = re.compile(
+    r'write_file\{content:<\|"\|>(.*?)<\|"\|>,path:<\|"\|>(.*?)<\|"\|>\}',
+    re.DOTALL,
+)
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"^(list_files|read_file|create_directory)\(\s*(?:directory|path)=['\"]([^'\"]*)['\"]\s*\)",
+    re.DOTALL,
+)
+_GEMMA_SIMPLE_CALL_RE = re.compile(
+    r'(list_files|read_file|create_directory)\{(?:directory|path):<\|"\|>(.*?)<\|"\|>\}',
+    re.DOTALL,
+)
 
 
 def _strip_think(text: str) -> str:
     return _THINK_RE.sub("", text).lstrip()
+
+
+def _parse_text_tool_call(text: str, tool_names: set[str]) -> tuple[str, dict] | None:
+    """Récupère les pseudo-appels Gemma lorsque Ollama omet `message.tool_calls`."""
+    clean = _strip_think(text).strip()
+    write_match = _GEMMA_WRITE_CALL_RE.search(clean)
+    if write_match and "write_file" in tool_names:
+        return "write_file", {"content": write_match.group(1), "path": write_match.group(2)}
+    simple_match = _TEXT_TOOL_CALL_RE.search(clean)
+    if simple_match is None:
+        simple_match = _GEMMA_SIMPLE_CALL_RE.search(clean)
+    if simple_match and simple_match.group(1) in tool_names:
+        name, value = simple_match.groups()
+        key = "directory" if name == "list_files" else "path"
+        return name, {key: value}
+    return None
 
 
 def _claude_tools_to_ollama(tools: list[dict]) -> list[dict]:
@@ -203,8 +231,19 @@ class OllamaProvider(LLMProvider):
 
             if not raw_tool_calls:
                 text: str = _strip_think(msg.get("content", ""))
-                logger.debug("Ollama tool loop done", iterations=iteration + 1)
-                return text
+                textual_call = _parse_text_tool_call(text, tool_names)
+                if textual_call is None:
+                    logger.debug("Ollama tool loop done", iterations=iteration + 1)
+                    return text
+                textual_name, textual_args = textual_call
+                raw_tool_calls = [
+                    {
+                        "id": f"text_{textual_name}_{iteration}",
+                        "function": {"name": textual_name, "arguments": textual_args},
+                    }
+                ]
+                msg["content"] = ""
+                logger.warning("Ollama textual tool call recovered", name=textual_name)
 
             # Réinjecte la réponse assistant avec ses tool_calls dans l'historique
             current.append(

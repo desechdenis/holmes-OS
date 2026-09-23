@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from jarvis.engine.agent import _active_session_messages
 from jarvis.engine.session import Session, SessionManager
 
 
@@ -13,6 +14,18 @@ def test_session_add_message() -> None:
     session.add_message("assistant", "Salut chef.")
     assert len(session.messages) == 2
     assert session.messages[0] == {"role": "user", "content": "Bonjour"}
+
+
+def test_session_add_message_unless_last_avoids_transport_duplicate() -> None:
+    persisted: list[tuple[str, str]] = []
+    session = Session()
+    session.set_persist(lambda role, content: persisted.append((role, content)))
+
+    assert session.add_message_unless_last("assistant", "Tâche ajoutée") is True
+    assert session.add_message_unless_last("assistant", "Tâche ajoutée") is False
+
+    assert session.messages == [{"role": "assistant", "content": "Tâche ajoutée"}]
+    assert persisted == [("assistant", "Tâche ajoutée")]
 
 
 def test_session_manager_create() -> None:
@@ -42,3 +55,17 @@ def test_session_manager_unknown_id_creates_new() -> None:
     # "unknown-uuid" n'est pas dans le registre, donc deux sessions distinctes
     # (get_or_create crée une nouvelle si l'id n'est pas connu)
     assert s1.id != s2.id
+
+
+def test_active_llm_context_is_bounded_without_truncating_session() -> None:
+    session = Session()
+    for index in range(20):
+        session.add_message("user", f"question {index}")
+        session.add_message("assistant", f"réponse {index}")
+
+    active = _active_session_messages(session)
+
+    assert len(session.messages) == 40
+    assert len(active) <= 24
+    assert active[0]["role"] == "user"
+    assert active[-1]["content"] == "réponse 19"

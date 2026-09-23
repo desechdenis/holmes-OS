@@ -82,6 +82,33 @@ def test_supports_tools_true() -> None:
     assert provider.supports_tools is True
 
 
+def test_recovers_gemma_textual_write_file_call() -> None:
+    from jarvis.providers.llm.local import _parse_text_tool_call
+
+    text = (
+        'write_file{content:<|"|># Analyse\n\nContenu sûr.<|"|>,'
+        'path:<|"|>analyse.md<|"|>}<tool_call|>'
+    )
+
+    assert _parse_text_tool_call(text, {"write_file"}) == (
+        "write_file",
+        {"content": "# Analyse\n\nContenu sûr.", "path": "analyse.md"},
+    )
+
+
+def test_recovers_gemma_textual_list_files_call() -> None:
+    from jarvis.providers.llm.local import _parse_text_tool_call
+
+    assert _parse_text_tool_call(
+        "list_files(directory='input/holmes-os/')", {"list_files"}
+    ) == ("list_files", {"directory": "input/holmes-os/"})
+
+    assert _parse_text_tool_call(
+        'list_files{directory:<|"|>input/holmes-os/modules/<|"|>}<tool_call|>',
+        {"list_files"},
+    ) == ("list_files", {"directory": "input/holmes-os/modules/"})
+
+
 # ── _payload ──────────────────────────────────────────────────────────────────
 
 

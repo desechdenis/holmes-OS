@@ -26,6 +26,7 @@ from jarvis.kernel.settings import Settings
 _STATIC_PROMPT_PATH = PROMPTS_DIR / "system_static.md"
 _LOCAL_STATIC_PROMPT_PATH = PROMPTS_DIR / "system_holmes_local.md"
 _MAX_TOOL_RESULT_CHARS = 12_000
+_MAX_ACTIVE_SESSION_MESSAGES = 24
 
 
 def _clip_tool_result(text: str) -> str:
@@ -35,6 +36,14 @@ def _clip_tool_result(text: str) -> str:
         text[:_MAX_TOOL_RESULT_CHARS]
         + f"\n...[truncated, {len(text)} characters total]"
     )
+
+
+def _active_session_messages(session: Session) -> list[dict]:
+    """Conserve le transcript complet, mais borne le contexte envoyé au LLM."""
+    messages = list(session.messages[-_MAX_ACTIVE_SESSION_MESSAGES:])
+    while messages and messages[0].get("role") == "assistant":
+        messages.pop(0)
+    return messages
 
 
 class Agent:
@@ -206,7 +215,7 @@ class Agent:
         logger.debug("Agent responding", session_id=str(session.id), stream=stream)
 
         result = await self._llm.complete(
-            messages=session.messages,
+            messages=_active_session_messages(session),
             system=system,
             stream=True,  # toujours streaming pour la détection du tag
         )
@@ -232,7 +241,7 @@ class Agent:
         """
         system = self._build_system(notifications=notifications)
         return await self._llm.tool_loop(
-            messages=session.messages,
+            messages=_active_session_messages(session),
             system=system,
             tools=self._tool_registry.schemas(),  # type: ignore[union-attr]
             tool_executor=self._tool_registry.call_str,  # type: ignore[union-attr]
@@ -257,14 +266,14 @@ class Agent:
 
         if self.has_tools() and hasattr(self._llm, "stream_with_capture"):
             stream, capture = self._llm.stream_with_capture(  # type: ignore[union-attr]
-                messages=session.messages,
+                messages=_active_session_messages(session),
                 system=system,
                 tools=self._tool_registry.schemas(),  # type: ignore[union-attr]
             )
             return stream, capture
 
         # Provider sans outil (Ollama, Mistral) — wrapper async pour await complete()
-        messages_snap = list(session.messages)
+        messages_snap = _active_session_messages(session)
 
         async def _simple_stream() -> AsyncIterator[str]:
             result = await self._llm.complete(messages=messages_snap, system=system, stream=True)
@@ -312,7 +321,7 @@ class Agent:
             for (tid, _, _), r in zip(capture.calls, results, strict=True)
         ]
 
-        messages = list(session.messages) + [
+        messages = _active_session_messages(session) + [
             {"role": "assistant", "content": assistant_content},
             {"role": "user", "content": tool_result_blocks},
         ]

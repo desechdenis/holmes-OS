@@ -154,6 +154,14 @@ class ProjectStatus(StrEnum):
     KILLED = "killed"
 
 
+class MissionExecutionKind(StrEnum):
+    """Mode d'exécution d'une mission persistée."""
+
+    EXTERNAL = "external"
+    NAMED_WORKFLOW = "named_workflow"
+    LEGACY_LOCAL = "legacy_local"
+
+
 @dataclass
 class Step:
     id: str
@@ -188,6 +196,10 @@ class Project:
     llm_calls: int = 0
     files_created: list[str] = field(default_factory=list)
     requires_network: bool = False
+    execution_kind: MissionExecutionKind = MissionExecutionKind.LEGACY_LOCAL
+    workflow_id: str | None = None
+    executor_ref: str | None = None
+    blocked_reason: str | None = None
 
 
 @dataclass
@@ -315,6 +327,10 @@ class Initiative:
     cost_max_usd: float | None = None
     risk: str = "low"
     deadline: datetime | None = None
+    # Échéance métier (rendez-vous/rappel), distincte de la date limite
+    # d'exécution gouvernée portée par ``deadline``.
+    due_at: datetime | None = None
+    task_id: str | None = None
     next_action: str = ""
     requires_validation: bool = False
 
@@ -507,3 +523,11 @@ class Session:
         self.messages.append({"role": role, "content": content})
         if self._persist:
             self._persist(role, content)
+
+    def add_message_unless_last(self, role: str, content: str) -> bool:
+        """Persiste un transport seulement si le Gateway ne l'a pas déjà fait."""
+        message = {"role": role, "content": content}
+        if self.messages and self.messages[-1] == message:
+            return False
+        self.add_message(role, content)
+        return True

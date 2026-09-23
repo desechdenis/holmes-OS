@@ -42,13 +42,38 @@ un nouveau collecteur et ne transforme pas seul une observation en action.
 - Les secrets, souvenirs personnels, conversations et données d'exploitation ne
   sont jamais versionnés dans ce dépôt public.
 - La documentation publique ne décrit pas l'adressage interne, les noms d'hôtes,
-  leur rôle, l'inventaire détaillé des services ni l'emplacement des secrets.
+  leur rôle, l'inventaire détaillé des services internes ni l'emplacement des secrets.
 - Les exemples utilisent uniquement des valeurs factices.
 - Aucune nouvelle intégration externe n'est ajoutée sans besoin régulier établi.
 
 ## Réversibilité
 
 Holmes doit pouvoir être arrêté et retiré sans migration des données essentielles
-et sans modification du fonctionnement domestique. Les procédures d'installation
-et de retrait doivent inventorier chaque point de contact créé par Holmes et
-permettre de le supprimer indépendamment.
+et sans modification du fonctionnement domestique. Deux opérations distinctes
+sont prévues :
+
+1. **Extinction** — arrêter les processus API et voix, empêcher leur redémarrage
+   automatique, puis vérifier qu'aucun processus Holmes n'écoute ou n'émet.
+2. **Retrait** — après une période d'observation concluante, révoquer les jetons,
+   supprimer les autorisations et callbacks externes, archiver les données locales
+   utiles, puis retirer le code, les environnements et les fichiers de service.
+
+Les interrupteurs applicatifs réduisent la surface, mais ne prouvent pas à eux
+seuls l'absence de trafic. Le mode LLM local ne neutralise pas tous les outils,
+routes manuelles, téléchargements ni dépendances chargées par le navigateur. Une
+extinction garantie repose donc d'abord sur l'arrêt des processus Holmes ; une
+preuve renforcée peut être fournie par le pare-feu ou l'observation réseau.
+
+Chaque point de contact doit avoir un propriétaire, une condition d'activation
+et une méthode de coupure documentés. L'inventaire du dépôt se trouve dans
+`HOLMES_OUTBOUND_CONTACTS.md`; les raccordements propres à l'infrastructure sont
+tenus séparément par son opérateur.
+
+Les données canoniques, automatismes et services essentiels restent hors du cycle
+de vie de Holmes. La procédure de retrait ne les efface, ne les migre et ne les
+reconfigure jamais. Les données locales éventuellement conservées sont archivées
+dans un format lisible avant suppression.
+
+La réversibilité est validée par un test d'extinction continu de 48 heures. Une
+dépendance, une dégradation domestique ou un redémarrage non sollicité invalide le
+test et bloque le retrait définitif.

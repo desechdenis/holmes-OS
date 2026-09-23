@@ -90,6 +90,25 @@ def test_local_mode_uses_a_compact_holmes_prompt(local_mode: None) -> None:
     assert len(system) < 6_000
 
 
+def test_local_voice_profile_never_promises_persistent_memory(local_mode: None) -> None:
+    from jarvis.kernel.settings import settings
+
+    system = Agent(settings=settings, llm=_MockLLM())._build_system()
+
+    assert "ne promets jamais de mémoriser" in system.lower()
+    assert "pendant la conversation en cours" in system.lower()
+
+
+def test_api_voice_profile_never_promises_persistent_memory(api_mode: None) -> None:
+    from jarvis.kernel.settings import settings
+
+    system = Agent(settings=settings, llm=_MockLLM())._build_system()
+
+    assert "ne promets jamais de mémoriser" in system.lower()
+    assert "pendant la conversation en cours" in system.lower()
+    assert "tu veux que je mémorise ça" not in system.lower()
+
+
 # ── Test 1 : is_offline_mode ──────────────────────────────────────────────────
 
 

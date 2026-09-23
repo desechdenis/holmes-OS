@@ -57,6 +57,17 @@ def test_auth_enabled_missing_token_returns_401(client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_conversation_route_is_protected_by_global_auth(client: TestClient) -> None:
+    with patch("jarvis.engine.auth.settings") as mock:
+        mock.api_auth_enabled = True
+        mock.api_token = SecretStr("test-secret-token")
+        r = client.post(
+            "/api/conversation",
+            json={"text": "Bonjour", "conversation_id": None, "language": "fr"},
+        )
+    assert r.status_code == 401
+
+
 def test_auth_enabled_wrong_token_returns_401(client: TestClient) -> None:
     """Avec auth activée, mauvais token → 401."""
     with patch("jarvis.engine.auth.settings") as mock:

@@ -81,6 +81,10 @@
         cur:    p.steps_done||null,
         tot:    p.steps_total||null,
         rawId:  p.id,
+        rawStatus: p.status,
+        executionKind: p.execution_kind || "legacy_local",
+        canStart: p.can_start !== false,
+        blockedReason: p.blocked_reason || null,
       });
       const active = raw.filter(p => p.status !== "done" && p.status !== "failed" && p.status !== "killed").map(toRow);
       const ended  = raw.filter(p => p.status === "done" || p.status === "failed" || p.status === "killed").map(toRow);
@@ -442,7 +446,8 @@
     if (raw.permission_required)  chip(raw.permission_required);
     if (raw.cost_max_usd != null) chip("≤ " + Number(raw.cost_max_usd).toFixed(2) + "$");
     if (raw.risk)                 chip(raw.risk, "risk-" + raw.risk);
-    if (raw.deadline)             chip("deadline " + fmtDeadline(raw.deadline));
+    if (raw.deadline)             chip("limite " + fmtDeadline(raw.deadline));
+    if (raw.due_at)               chip("échéance " + fmtDeadline(raw.due_at));
     sec.appendChild(chips);
     if (raw.next_action) {
       const next = el("div", { class: "gov-next" });
@@ -486,6 +491,7 @@
     addSec("Action proposée", raw.action || i.title);
     addSec("Contexte", raw.context);
     addSec("Raisonnement", raw.reasoning);
+    addSec("Sources", (raw.sources || []).join(" · "));
 
     if (raw.draft_content) {
       const s = el("div", { class: "panel-section" });
@@ -503,18 +509,28 @@
 
     // Actions
     const actSec = el("div", { class: "panel-section", style: { display: "flex", gap: "8px", marginTop: "8px" } });
-    const approveBtn = el("button", { class: "m-btn", text: raw.type === "draft_response" ? "📝 Préparer le brouillon" : "✓ Approuver" });
+    const primaryLabel = raw.type === "draft_response" ? "📝 Préparer le brouillon"
+      : raw.type === "auto_task" ? "→ Voir le plan"
+      : raw.type === "reminder" ? "✓ C'est noté" : "✓ Traiter";
+    const approveBtn = el("button", { class: "m-btn", text: primaryLabel });
     approveBtn.addEventListener("click", async () => {
       approveBtn.textContent = "…"; approveBtn.disabled = true;
       try {
-        const result = await J.api.post("/api/proactive/initiatives/" + raw.id + "/run");
+        let result;
+        if (raw.type === "reminder") {
+          result = await J.api.post("/api/initiatives/" + raw.id + "/acknowledge");
+        } else if (raw.type === "auto_task") {
+          result = await previewInitiativeMission(raw.id);
+        } else {
+          result = await J.api.post("/api/proactive/initiatives/" + raw.id + "/run");
+        }
         const message = result.status === "draft_ready"
           ? "Brouillon prêt — confirmation finale dans Mission Control"
           : "Initiative prise en charge";
         J.notify({ kind: "success", text: message });
         closePanel();
         if (_activePage === "apercu") renderApercu(); else renderInitiatives();
-      } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); approveBtn.disabled = false; approveBtn.textContent = "Approuver"; }
+      } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); approveBtn.disabled = false; approveBtn.textContent = primaryLabel; }
     });
     const rejectBtn = el("button", { class: "m-btn danger", text: "✗ Rejeter" });
     rejectBtn.addEventListener("click", async () => {
@@ -527,6 +543,30 @@
       } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); rejectBtn.disabled = false; rejectBtn.textContent = "Rejeter"; }
     });
     actSec.appendChild(approveBtn);
+    if (raw.type !== "draft_response" && raw.type !== "auto_task") {
+      const taskBtn = el("button", { class: "m-btn", text: "+ Tâche" });
+      taskBtn.addEventListener("click", async () => {
+        taskBtn.disabled = true;
+        try {
+          await J.api.post("/api/initiatives/" + raw.id + "/to-task");
+          J.notify({ kind: "success", text: "Ajouté à la liste canonique Soul" });
+          closePanel(); renderInitiatives();
+        } catch (e) { taskBtn.disabled = false; J.notify({ kind: "error", text: e.message }); }
+      });
+      actSec.appendChild(taskBtn);
+    }
+    if (raw.type === "reminder") {
+      const snoozeBtn = el("button", { class: "m-btn", text: "Dans 1 h" });
+      snoozeBtn.addEventListener("click", async () => {
+        snoozeBtn.disabled = true;
+        try {
+          await J.api.post("/api/initiatives/" + raw.id + "/snooze", { minutes: 60 });
+          J.notify({ kind: "success", text: "Rappel reporté d'une heure" });
+          closePanel(); renderInitiatives();
+        } catch (e) { snoozeBtn.disabled = false; J.notify({ kind: "error", text: e.message }); }
+      });
+      actSec.appendChild(snoozeBtn);
+    }
     actSec.appendChild(rejectBtn);
     body.appendChild(actSec);
 
@@ -568,8 +608,11 @@
     // Right — actions or ID
     const right = el("div", { class: "row-stripe-right" });
     if (showActions && i.raw) {
-      const approve = el("button", { class: "m-btn", text: "Approuver" });
-      approve.addEventListener("click", (e) => { e.stopPropagation(); approveInit(i.raw.id, approve); });
+      const label = i.raw.type === "draft_response" ? "Préparer"
+        : i.raw.type === "auto_task" ? "Voir le plan"
+        : i.raw.type === "reminder" ? "C'est noté" : "Traiter";
+      const approve = el("button", { class: "m-btn", text: label });
+      approve.addEventListener("click", (e) => { e.stopPropagation(); approveInit(i.raw, approve, label); });
       const reject = el("button", { class: "m-btn danger", text: "Rejeter" });
       reject.addEventListener("click", (e) => { e.stopPropagation(); rejectInit(i.raw.id, reject); });
       right.appendChild(approve); right.appendChild(reject);
@@ -580,16 +623,41 @@
     return row;
   }
 
-  async function approveInit(id, btn) {
+  async function approveInit(raw, btn, label) {
     btn.textContent = "…"; btn.disabled = true;
     try {
-      const result = await J.api.post("/api/proactive/initiatives/" + id + "/run");
+      let result;
+      if (raw.type === "reminder") {
+        result = await J.api.post("/api/initiatives/" + raw.id + "/acknowledge");
+      } else if (raw.type === "auto_task") {
+        result = await previewInitiativeMission(raw.id);
+      } else {
+        result = await J.api.post("/api/proactive/initiatives/" + raw.id + "/run");
+      }
       const message = result.status === "draft_ready"
         ? "Brouillon prêt — confirmation finale dans Mission Control"
         : "Initiative prise en charge";
       J.notify({ kind: "success", text: message });
       renderInitiatives();
-    } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); btn.textContent = "Approuver"; btn.disabled = false; }
+    } catch (e) { J.notify({ kind: "error", text: "Erreur : " + e.message }); btn.textContent = label || "Traiter"; btn.disabled = false; }
+  }
+
+  async function previewInitiativeMission(initiativeId) {
+    const result = await J.api.post("/api/proactive/initiatives/" + initiativeId + "/mission-preview", { timeout_minutes: 30 });
+    const plan = result.mission;
+    const lines = (plan.steps || []).map((s, n) => (n + 1) + ". " + s.title + "\n   ✓ " + s.success_criterion);
+    if (plan.can_start === false) {
+      J.notify({
+        kind: "info",
+        text: "Dossier de délégation créé. " + (plan.blocked_reason || "Exécuteur externe à configurer."),
+      });
+      return { status: "delegation_ready" };
+    }
+    const accepted = window.confirm("PLAN PROPOSÉ — aucune action encore lancée\n\n" + lines.join("\n\n") + "\n\nLancer cette mission ?");
+    if (accepted) {
+      return J.api.post("/api/proactive/initiatives/" + initiativeId + "/mission-confirm");
+    }
+    return { status: "plan_ready" };
   }
   async function rejectInit(id, btn) {
     btn.textContent = "…"; btn.disabled = true;
@@ -799,6 +867,19 @@
       body.appendChild(stepSec);
     }
 
+    if (detail && detail.can_start === false) {
+      const blockedSec = el("div", { class: "panel-section" });
+      blockedSec.appendChild(el("div", {
+        class: "panel-section-title",
+        text: detail.execution_kind === "external" ? "À déléguer" : "Mission bloquée",
+      }));
+      blockedSec.appendChild(el("div", {
+        class: "j-empty",
+        text: detail.blocked_reason || "Aucun exécuteur sûr n'est configuré.",
+      }));
+      body.appendChild(blockedSec);
+    }
+
     // Files
     if (files && files.length) {
       const fileSec = el("div", { class: "panel-section" });
@@ -824,6 +905,21 @@
       const actSec = el("div", { class: "panel-section" });
       actSec.appendChild(el("div", { class: "panel-section-title", text: "Actions" }));
       const actRow = el("div", { class: "mp-act-row" });
+      if (m.rawStatus === "planning" && detail && detail.can_start !== false) {
+        const startBtn = el("button", { class: "m-btn", text: "Lancer le plan" });
+        startBtn.addEventListener("click", async () => {
+          startBtn.textContent = "…"; startBtn.disabled = true;
+          try {
+            await J.api.post("/api/missions/" + encodeURIComponent(m.rawId) + "/start");
+            J.notify({ kind: "success", text: "Mission lancée après validation du plan" });
+            closePanel(); renderMissions();
+          } catch (e) {
+            J.notify({ kind: "error", text: e.message });
+            startBtn.textContent = "Lancer le plan"; startBtn.disabled = false;
+          }
+        });
+        actRow.appendChild(startBtn);
+      }
       const retryBtn = el("button", { class: "m-btn", text: m.status === "wait" ? "Reprendre" : "Retry" });
       retryBtn.addEventListener("click", async () => {
         retryBtn.textContent = "…"; retryBtn.disabled = true;
@@ -835,8 +931,8 @@
           renderMissions();
         } catch (e) { J.notify({ kind: "error", text: e.message }); retryBtn.textContent = "Retry"; retryBtn.disabled = false; }
       });
-      if (m.status !== "run") actRow.appendChild(retryBtn);
-      if (m.status === "run") {
+      if (m.status !== "run" && m.rawStatus !== "planning" && (!detail || detail.can_start !== false)) actRow.appendChild(retryBtn);
+      if (m.status === "run" && m.rawStatus !== "planning") {
         const killBtn = el("button", { class: "m-btn danger", text: "Arrêter" });
         killBtn.addEventListener("click", async () => {
           killBtn.disabled = true;
@@ -884,8 +980,25 @@
         submitted = true; input.disabled = true;
         J.notify({ kind: "info", text: "Holmes prépare le plan de mission…" });
         try {
-          await J.api.post("/api/projects", { mission, timeout_minutes: 30 });
-          J.notify({ kind: "success", text: "Mission lancée" });
+          const preview = await J.api.post("/api/missions/preview", { mission, timeout_minutes: 30 });
+          const plan = preview.mission;
+          const lines = (plan.steps || []).map((s, n) => (n + 1) + ". " + s.title + "\n   ✓ " + s.success_criterion);
+          if (plan.can_start === false) {
+            J.notify({
+              kind: "info",
+              text: "Dossier de délégation créé. " + (plan.blocked_reason || "Exécuteur externe à configurer."),
+            });
+            renderMissions();
+            return;
+          }
+          const accepted = window.confirm("PLAN DE MISSION — aucune action encore lancée\n\n" + lines.join("\n\n") + "\n\nLancer cette mission ?");
+          if (!accepted) {
+            J.notify({ kind: "info", text: "Plan conservé, mission non lancée" });
+            renderMissions();
+            return;
+          }
+          await J.api.post("/api/missions/" + encodeURIComponent(plan.id) + "/start");
+          J.notify({ kind: "success", text: "Mission lancée après validation du plan" });
           renderMissions();
         } catch (e) {
           J.notify({ kind: "error", text: e.message });

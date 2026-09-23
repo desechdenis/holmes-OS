@@ -147,6 +147,23 @@ class Settings(BaseSettings):
             "humaine — ce flag NE peut PAS contourner la règle CDC §10.1."
         ),
     )
+    mission_legacy_local_enabled: bool = Field(
+        default=False,
+        description=(
+            "Autorise l'ancien worker de missions généralistes piloté par LLM local. "
+            "Désactivé par défaut : les plans historiques restent consultables, mais "
+            "leur démarrage, reprise et nouvel essai sont bloqués jusqu'à leur migration "
+            "vers un workflow nommé ou un exécuteur externe."
+        ),
+    )
+    proactive_llm_enabled: bool = Field(
+        default=False,
+        description=(
+            "Autorise la génération périodique d'initiatives par LLM. Désactivé par "
+            "défaut pendant la migration vers des détecteurs déterministes ; le store "
+            "et l'interface des initiatives restent disponibles."
+        ),
+    )
     auto_install_whitelisted_enabled: bool = Field(
         default=False,
         description=(

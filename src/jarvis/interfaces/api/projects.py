@@ -37,6 +37,7 @@ class ProjectCreateBody(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
+@router.get("/api/missions")
 @router.get("/api/projects")
 async def list_projects(request: Request) -> list[dict]:
     orch = _orch(request)
@@ -51,6 +52,21 @@ async def list_projects(request: Request) -> list[dict]:
             "created_at": p.created_at.isoformat(),
             "completed_at": p.completed_at.isoformat() if p.completed_at else None,
             "files_created": len(p.files_created),
+            "execution_kind": p.execution_kind,
+            "can_start": (
+                bool(getattr(orch, "_legacy_local_enabled", True))
+                and p.execution_kind == "legacy_local"
+                and p.blocked_reason is None
+            ),
+            "blocked_reason": (
+                p.blocked_reason
+                or (
+                    "Exécution locale des missions libres désactivée."
+                    if not bool(getattr(orch, "_legacy_local_enabled", True))
+                    and p.execution_kind == "legacy_local"
+                    else None
+                )
+            ),
         }
         for p in projects
     ]
@@ -58,11 +74,41 @@ async def list_projects(request: Request) -> list[dict]:
 
 @router.post("/api/projects")
 async def create_project(body: ProjectCreateBody, request: Request) -> dict:
+    """Compatibilité historique : crée désormais un plan, jamais un worker.
+
+    Le lancement exige ensuite POST /api/missions/{id}/start. Cette séparation
+    empêche les anciens clients de contourner l'aperçu introduit par Holmes.
+    """
     mission = body.mission.strip()
     if not mission:
         raise_api_error("JRV-API-001", 422, "La mission ne peut pas être vide")
     timeout = min(max(body.timeout_minutes, 1), 240)
-    project = await _orch(request).create_and_run(mission, timeout_minutes=timeout)
+    project = await _orch(request).create_plan(mission, timeout_minutes=timeout)
+    return {"ok": True, "project_id": project.id, "status": project.status}
+
+
+@router.post("/api/missions/preview")
+@router.post("/api/projects/preview")
+async def preview_mission(body: ProjectCreateBody, request: Request) -> dict:
+    """Prépare le plan sans exécuter la mission."""
+    mission = body.mission.strip()
+    if not mission:
+        raise_api_error("JRV-API-001", 422, "La mission ne peut pas être vide")
+    timeout = min(max(body.timeout_minutes, 1), 240)
+    project = await _orch(request).create_plan(mission, timeout_minutes=timeout)
+    return {"ok": True, "mission": _orch(request)._project_summary(project)}
+
+
+@router.post("/api/missions/{project_id}/start")
+@router.post("/api/projects/{project_id}/start")
+async def start_mission(project_id: str, request: Request) -> dict:
+    """Lance un plan après confirmation explicite de l'utilisateur."""
+    try:
+        project = _orch(request).start_project(project_id)
+    except KeyError as exc:
+        raise_api_error("JRV-API-003", 404, f"Mission non trouvée : {project_id}", cause=exc)
+    except ValueError as exc:
+        raise_api_error("JRV-API-001", 409, str(exc), cause=exc)
     return {"ok": True, "project_id": project.id, "status": project.status}
 
 
@@ -103,7 +149,10 @@ async def kill_project(project_id: str, request: Request) -> dict:
 @router.post("/api/projects/{project_id}/retry")
 async def retry_project(project_id: str, request: Request) -> dict:
     orch = _orch(request)
-    project = await orch.retry_project(project_id)
+    try:
+        project = await orch.retry_project(project_id)
+    except ValueError as exc:
+        raise_api_error("JRV-API-001", 409, str(exc), cause=exc)
     if not project:
         raise_api_error("JRV-API-003", 404, f"Projet non trouvé : {project_id}")
     return {"ok": True, "project_id": project.id, "status": project.status}
@@ -111,7 +160,10 @@ async def retry_project(project_id: str, request: Request) -> dict:
 
 @router.post("/api/projects/{project_id}/resume")
 async def resume_project(project_id: str, request: Request) -> dict:
-    project = await _orch(request).resume_project(project_id)
+    try:
+        project = await _orch(request).resume_project(project_id)
+    except ValueError as exc:
+        raise_api_error("JRV-API-001", 409, str(exc), cause=exc)
     if not project:
         raise_api_error("JRV-API-003", 409, f"Projet non reprenable : {project_id}")
     return {"ok": True, "project_id": project.id, "status": project.status}

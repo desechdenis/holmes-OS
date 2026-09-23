@@ -30,3 +30,5 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.host == "127.0.0.1"
     assert s.port == 8000
     assert s.anthropic_model == "claude-sonnet-4-6"
+    assert s.mission_legacy_local_enabled is False
+    assert s.proactive_llm_enabled is False

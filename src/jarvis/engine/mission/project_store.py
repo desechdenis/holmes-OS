@@ -11,7 +11,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from jarvis.engine.mission.schemas import LogEntry, Project, ProjectStatus, Step, StepStatus
+from jarvis.engine.mission.schemas import (
+    LogEntry,
+    MissionExecutionKind,
+    Project,
+    ProjectStatus,
+    Step,
+    StepStatus,
+)
 from jarvis.engine.vocab import AccessLevel
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.file_lock import exclusive_file_lock
@@ -235,6 +242,10 @@ class ProjectStore:
             "llm_calls": project.llm_calls,
             "files_created": project.files_created,
             "requires_network": project.requires_network,
+            "execution_kind": project.execution_kind,
+            "workflow_id": project.workflow_id,
+            "executor_ref": project.executor_ref,
+            "blocked_reason": project.blocked_reason,
             "steps": [
                 {
                     "id": s.id,
@@ -296,4 +307,10 @@ class ProjectStore:
             llm_calls=d.get("llm_calls", 0),
             files_created=d.get("files_created", []),
             requires_network=d.get("requires_network", False),
+            execution_kind=MissionExecutionKind(
+                d.get("execution_kind", MissionExecutionKind.LEGACY_LOCAL)
+            ),
+            workflow_id=d.get("workflow_id"),
+            executor_ref=d.get("executor_ref"),
+            blocked_reason=d.get("blocked_reason"),
         )

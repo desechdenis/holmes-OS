@@ -12,7 +12,7 @@ import re
 from loguru import logger
 
 from jarvis.engine.mission.project_store import ProjectStore
-from jarvis.engine.mission.schemas import Project, Step, StepStatus
+from jarvis.engine.mission.schemas import MissionExecutionKind, Project, Step, StepStatus
 from jarvis.engine.vocab import AccessLevel
 from jarvis.kernel.contracts import LLMProvider
 from jarvis.kernel.error_collector import collector  # jrv: autofix
@@ -27,6 +27,12 @@ Règles générales :
   suppression de fichiers, déploiement en production
 - Maximum 12 étapes (RAPPORT.md inclus)
 - Sois réaliste sur ce qui est faisable dans un répertoire isolé
+- Les SEULS outils disponibles sont : list_files, read_file, write_file,
+  create_directory, execute_cli et fusion_360. Il n'existe aucun navigateur,
+  moteur de recherche Web, Google Search, web_search ou outil HTTP générique.
+- N'invente jamais une recherche Internet. Si la mission analyse Holmes OS ou Jarvis OS,
+  une copie locale contrôlée du dépôt est disponible dans `input/holmes-os/` : commence
+  par list_files puis read_file sur ce dossier et produis tes notes dans le workspace.
 
 Règles qualité obligatoires :
 - Insère une étape de vérification/test toutes les 3-4 étapes de production (exécuter le code,
@@ -116,6 +122,7 @@ class ProjectManager:
         assert isinstance(raw, str)
 
         plan = self._parse_plan(raw)
+        plan = self._adapt_local_source_audit(plan, mission)
         plan = self._add_quality_steps(plan)
         project = self._store.create_project(
             mission=mission,
@@ -151,6 +158,115 @@ class ProjectManager:
             requires_network=project.requires_network,
         )
         return project
+
+    def create_external_delegation(
+        self,
+        mission: str,
+        timeout_minutes: int = 30,
+    ) -> Project:
+        """Crée un dossier sans demander à un LLM d'inventer un plan."""
+        title = re.sub(r"\s+", " ", mission).strip()
+        if len(title) > 60:
+            title = title[:57].rstrip() + "..."
+        project = self._store.create_project(
+            mission=mission,
+            title=title or "Mission à déléguer",
+            timeout_minutes=timeout_minutes,
+        )
+        project.execution_kind = MissionExecutionKind.EXTERNAL
+        project.blocked_reason = "Exécuteur externe non configuré."
+        project.steps.append(
+            Step(
+                id="delegation_001",
+                title="Configurer et valider la délégation",
+                description=(
+                    "Sélectionner un exécuteur externe, vérifier son périmètre et "
+                    "faire approuver son plan avant tout lancement."
+                ),
+                requires_approval=True,
+                success_criterion=(
+                    "Un exécuteur externe est configuré et son plan a été approuvé."
+                ),
+                access_level=AccessLevel.READ_ONLY,
+            )
+        )
+        self._store.save_project(project)
+        logger.info("External delegation dossier created", id=project.id)
+        return project
+
+    @staticmethod
+    def _adapt_local_source_audit(plan: dict, mission: str) -> dict:
+        """Remplace le plan libre par un audit local borné et reproductible."""
+        if not re.search(r"\b(?:holmes|jarvis)(?:\s+os)?\b", mission, re.IGNORECASE):
+            return plan
+
+        plan.update(
+            {
+                "project_type": "content",
+                "requires_network": False,
+                "steps": [
+                    {
+                        "id": "step_001",
+                        "title": "Inventorier le dépôt local",
+                        "description": (
+                            "Utiliser list_files sur `input/holmes-os/`. Produire ensuite "
+                            "`01-inventaire.md` avec les principaux répertoires réellement "
+                            "observés et au moins cinq chemins de preuve. Ne supposer aucun "
+                            "dossier absent de la liste."
+                        ),
+                        "success_criterion": (
+                            "01-inventaire.md existe, est non vide et cite au moins cinq chemins "
+                            "sous input/holmes-os/."
+                        ),
+                        "verification_command": "test -s 01-inventaire.md",
+                        "access_level": int(AccessLevel.WRITE_LOCAL),
+                        "requires_approval": False,
+                    },
+                    {
+                        "id": "step_002",
+                        "title": "Cartographier l'architecture",
+                        "description": (
+                            "Lire `input/holmes-os/README.md`, `pyproject.toml`, "
+                            "`src/jarvis/bootstrap.py`, `src/jarvis/engine/gateway.py` et les "
+                            "fichiers principaux de `src/jarvis/engine/mission/`. Produire "
+                            "`02-architecture.md` en citant les chemins utilisés."
+                        ),
+                        "success_criterion": "02-architecture.md existe et est non vide.",
+                        "verification_command": "test -s 02-architecture.md",
+                        "access_level": int(AccessLevel.WRITE_LOCAL),
+                        "requires_approval": False,
+                    },
+                    {
+                        "id": "step_003",
+                        "title": "Évaluer dépendances et risques",
+                        "description": (
+                            "Lire `input/holmes-os/pyproject.toml`, les réglages dans "
+                            "`src/jarvis/kernel/settings.py` et les documents sous "
+                            "`input/holmes-os/docs/architecture/`. Produire `03-risques.md` avec "
+                            "constats vérifiés, hypothèses et données manquantes séparés."
+                        ),
+                        "success_criterion": "03-risques.md existe et est non vide.",
+                        "verification_command": "test -s 03-risques.md",
+                        "access_level": int(AccessLevel.WRITE_LOCAL),
+                        "requires_approval": False,
+                    },
+                    {
+                        "id": "step_004",
+                        "title": "Synthétiser l'état de Holmes OS",
+                        "description": (
+                            "Lire les trois notes produites et créer `ANALYSE_HOLMES.md` avec "
+                            "l'état actuel, les forces, les risques classés par sévérité et les "
+                            "prochaines actions. Chaque constat doit citer un chemin local."
+                        ),
+                        "success_criterion": "ANALYSE_HOLMES.md existe et est non vide.",
+                        "verification_command": "test -s ANALYSE_HOLMES.md",
+                        "access_level": int(AccessLevel.WRITE_LOCAL),
+                        "requires_approval": False,
+                    },
+                ],
+            }
+        )
+        return plan
 
     def _add_quality_steps(self, plan: dict) -> dict:
         """Injecte une étape de test typée + RAPPORT.md en fin de plan."""

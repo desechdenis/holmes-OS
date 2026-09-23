@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from jarvis.kernel.schemas import (  # noqa: F401
     LogEntry,
+    MissionExecutionKind,
     Project,
     ProjectStatus,
     Step,

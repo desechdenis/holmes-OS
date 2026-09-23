@@ -16,15 +16,18 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from jarvis.engine.audit import AuditLog
+from jarvis.engine.mission.file_tool import SandboxedFileTool
 from jarvis.engine.mission.governance import Governance
-from jarvis.engine.mission.orchestrator import ProjectOrchestrator
+from jarvis.engine.mission.orchestrator import ProjectOrchestrator, _seed_holmes_snapshot
+from jarvis.engine.mission.project_manager import ProjectManager
 from jarvis.engine.mission.project_store import ProjectStore
 from jarvis.engine.mission.schemas import (
+    MissionExecutionKind,
     Project,
     ProjectStatus,
     Step,
@@ -53,6 +56,11 @@ class _NoOpLLM(LLMProvider):
 
     async def health_check(self) -> bool:
         return True
+
+
+class _ForbiddenLLM(_NoOpLLM):
+    async def complete(self, *args: object, **kwargs: object) -> str:  # type: ignore[override]
+        raise AssertionError("Le LLM ne doit pas planifier une délégation externe")
 
 
 class _FakeBudget:
@@ -151,6 +159,117 @@ def test_persistance_step_roundtrip(tmp_path: Path) -> None:
         assert s.status == StepStatus.DONE
 
 
+@pytest.mark.asyncio
+async def test_safe_mode_creates_external_dossier_without_llm_or_repo_snapshot(
+    tmp_path: Path,
+) -> None:
+    with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
+        store = ProjectStore()
+        orchestrator = ProjectOrchestrator(
+            broadcast_event=lambda _: None,
+            store=store,
+            manager=ProjectManager(llm=_ForbiddenLLM()),
+            worker_llm=_ForbiddenLLM(),
+            legacy_local_enabled=False,
+        )
+
+        project = await orchestrator.create_plan("Analyser Holmes OS")
+
+        assert project.execution_kind is MissionExecutionKind.EXTERNAL
+        assert project.llm_calls == 0
+        assert project.blocked_reason == "Exécuteur externe non configuré."
+        assert not (Path(project.workspace_path) / "input").exists()
+        summary = orchestrator._project_summary(project)
+        assert summary["can_start"] is False
+        assert summary["execution_kind"] == "external"
+
+
+def test_legacy_project_without_execution_fields_remains_readable(tmp_path: Path) -> None:
+    with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
+        store = ProjectStore()
+        project = store.create_project("Ancienne mission", "Legacy")
+        state_path = Path(project.workspace_path) / ".jarvis" / "state.json"
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        payload.pop("execution_kind", None)
+        payload.pop("workflow_id", None)
+        payload.pop("executor_ref", None)
+        payload.pop("blocked_reason", None)
+        state_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        restored = store.load_project(project.id)
+
+        assert restored is not None
+        assert restored.execution_kind is MissionExecutionKind.LEGACY_LOCAL
+
+
+def test_holmes_audit_plan_replaces_fictitious_web_search() -> None:
+    plan = {
+        "title": "Audit Holmes",
+        "requires_network": True,
+        "steps": [
+            {
+                "id": "step_001",
+                "title": "Recherche de documentation publique sur Holmes OS",
+                "description": "Faire une recherche Google approfondie en ligne.",
+                "success_criterion": "Documentation trouvée",
+                "access_level": 3,
+                "requires_approval": False,
+            }
+        ],
+    }
+
+    adapted = ProjectManager._adapt_local_source_audit(plan, "analyser l'état de Holmes OS")
+
+    step = adapted["steps"][0]
+    assert adapted["requires_network"] is False
+    assert adapted["project_type"] == "content"
+    assert len(adapted["steps"]) == 4
+    assert step["title"] == "Inventorier le dépôt local"
+    assert "input/holmes-os/" in step["description"]
+    assert step["verification_command"] == "test -s 01-inventaire.md"
+    assert step["access_level"] == int(AccessLevel.WRITE_LOCAL)
+
+
+def test_holmes_snapshot_copies_only_explicit_safe_entries(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    (source / "src" / "jarvis").mkdir(parents=True)
+    (source / "src" / "jarvis" / "app.py").write_text("# app", encoding="utf-8")
+    (source / "README.md").write_text("Holmes", encoding="utf-8")
+    (source / ".env").write_text("SECRET=never-copy", encoding="utf-8")
+    (source / ".git").mkdir()
+    (source / ".git" / "config").write_text("secret", encoding="utf-8")
+    (source / "config").mkdir()
+    (source / "config" / "permissions.yaml").write_text("safe: true", encoding="utf-8")
+    (source / "config" / "google_token.json").write_text("secret", encoding="utf-8")
+    project = Project(
+        id="proj_test", title="Audit", mission="Holmes", workspace_path=str(workspace)
+    )
+
+    _seed_holmes_snapshot(project, source_root=source)
+
+    snapshot = workspace / "input" / "holmes-os"
+    assert (snapshot / "src" / "jarvis" / "app.py").read_text() == "# app"
+    assert (snapshot / "README.md").read_text() == "Holmes"
+    assert (snapshot / "config" / "permissions.yaml").exists()
+    assert not (snapshot / "config" / "google_token.json").exists()
+    assert not (snapshot / ".env").exists()
+    assert not (snapshot / ".git").exists()
+
+
+def test_mission_file_tool_hides_and_blocks_sensitive_files(tmp_path: Path) -> None:
+    (tmp_path / "report.md").write_text("public", encoding="utf-8")
+    (tmp_path / "google_token.json").write_text("secret", encoding="utf-8")
+    (tmp_path / "server.key").write_text("private", encoding="utf-8")
+    tool = SandboxedFileTool(str(tmp_path))
+
+    assert tool.list_files() == ["report.md"]
+    with pytest.raises(ValueError, match="fichier sensible"):
+        tool.read_file("google_token.json")
+    with pytest.raises(ValueError, match="fichier sensible"):
+        tool.read_file("server.key")
+
+
 def test_persistance_projet_ancien_format_compat(tmp_path: Path) -> None:
     """Un projet sauvegardé AVANT PHASE 1 (sans les nouveaux champs) se recharge sans crash."""
     with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
@@ -237,6 +356,78 @@ def test_recovery_places_interrupted_project_in_safe_pause(tmp_path: Path) -> No
         assert loaded.status == ProjectStatus.PAUSED
         assert loaded.steps[0].status == StepStatus.PENDING
         assert store.claim_step(project.id, "s1", "worker-new") is True
+
+
+def _safe_orchestrator(store: ProjectStore) -> ProjectOrchestrator:
+    return ProjectOrchestrator(
+        broadcast_event=MagicMock(),
+        store=store,
+        manager=MagicMock(),
+        worker_llm=_NoOpLLM(),
+        legacy_local_enabled=False,
+    )
+
+
+def test_safe_mode_blocks_start_before_worker_creation(tmp_path: Path) -> None:
+    """Le mode sûr bloque un ancien plan sans même construire WorkerAgent."""
+    with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
+        store = ProjectStore()
+        project = store.create_project("Mission libre", "Plan legacy")
+        project.steps = [_step()]
+        store.save_project(project)
+        orchestrator = _safe_orchestrator(store)
+
+        with (
+            patch("jarvis.engine.mission.orchestrator.WorkerAgent") as worker_cls,
+            pytest.raises(ValueError, match="désactivée"),
+        ):
+            orchestrator.start_project(project.id)
+
+        worker_cls.assert_not_called()
+        assert store.load_project(project.id).status == ProjectStatus.PLANNING  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_safe_mode_blocks_create_and_run_before_planning() -> None:
+    """Le raccourci historique ne doit même plus appeler le planificateur LLM."""
+    manager = MagicMock()
+    orchestrator = ProjectOrchestrator(
+        broadcast_event=MagicMock(),
+        store=MagicMock(),
+        manager=manager,
+        worker_llm=_NoOpLLM(),
+        legacy_local_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="désactivée"):
+        await orchestrator.create_and_run("Mission libre")
+
+    manager.create_project.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["retry_project", "resume_project"])
+async def test_safe_mode_blocks_retry_and_resume_without_mutation(
+    tmp_path: Path, operation: str
+) -> None:
+    with patch("jarvis.engine.mission.project_store.WORKSPACE_DIR", tmp_path):
+        store = ProjectStore()
+        project = store.create_project("Mission libre", "Plan legacy")
+        project.status = (
+            ProjectStatus.FAILED if operation == "retry_project" else ProjectStatus.PAUSED
+        )
+        project.steps = [_step()]
+        store.save_project(project)
+        orchestrator = _safe_orchestrator(store)
+
+        with (
+            patch("jarvis.engine.mission.orchestrator.WorkerAgent") as worker_cls,
+            pytest.raises(ValueError, match="désactivée"),
+        ):
+            await getattr(orchestrator, operation)(project.id)
+
+        worker_cls.assert_not_called()
+        assert store.load_project(project.id).status == project.status  # type: ignore[union-attr]
 
 
 # ── 3. Step bloque la progression si non vérifié (§4.4) ───────────────────────

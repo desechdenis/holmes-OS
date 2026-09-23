@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import shutil
 from collections.abc import Callable
+from pathlib import Path
 
 from loguru import logger
 
@@ -18,6 +21,7 @@ from jarvis.engine.mission.project_store import ProjectStore
 from jarvis.engine.mission.reflexion import Reflexion
 from jarvis.engine.mission.schemas import (
     LogEntry,
+    MissionExecutionKind,
     Project,
     ProjectStatus,
     StepStatus,
@@ -27,6 +31,47 @@ from jarvis.engine.mission.worker_agent import WorkerAgent
 from jarvis.kernel.contracts import LLMProvider
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.events import EventBus
+from jarvis.kernel.paths import PROJECT_ROOT
+
+_HOLMES_SNAPSHOT_ENTRIES = (
+    "src",
+    "tests",
+    "docs",
+    "prompts",
+    "config/permissions.yaml",
+    "config/approvals.json",
+    "pyproject.toml",
+    "README.md",
+    "jarvis",
+)
+
+
+def _mission_targets_holmes(mission: str) -> bool:
+    return bool(re.search(r"\b(?:holmes|jarvis)(?:\s+os)?\b", mission, re.IGNORECASE))
+
+
+def _seed_holmes_snapshot(project: Project, source_root: Path = PROJECT_ROOT) -> None:
+    """Copie un sous-ensemble sans secrets du dépôt dans le workspace isolé."""
+    target_root = Path(project.workspace_path) / "input" / "holmes-os"
+    target_root.mkdir(parents=True, exist_ok=True)
+    for relative in _HOLMES_SNAPSHOT_ENTRIES:
+        source = source_root / relative
+        if not source.exists():
+            continue
+        target = target_root / relative
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                target,
+                dirs_exist_ok=True,
+                symlinks=True,
+                ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.pyc", ".DS_Store", "node_modules", ".pytest_cache"
+                ),
+            )
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
 
 class ProjectOrchestrator:
@@ -48,6 +93,7 @@ class ProjectOrchestrator:
         budget_guard: BudgetGuard | None = None,
         reflexion: Reflexion | None = None,
         bus: EventBus | None = None,
+        legacy_local_enabled: bool = True,
     ) -> None:
         self._broadcast = broadcast_event
         self._budget = budget_guard
@@ -56,6 +102,10 @@ class ProjectOrchestrator:
         self._manager = manager
         self._worker_llm = worker_llm
         self._bus = bus
+        # Compatibilité des constructeurs existants : le défaut reste permissif
+        # pour les tests/unités qui instancient directement l'orchestrateur. Le
+        # bootstrap de Holmes injecte toujours le réglage sûr (False par défaut).
+        self._legacy_local_enabled = legacy_local_enabled
         self._workers: dict[str, WorkerAgent] = {}
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
 
@@ -66,7 +116,31 @@ class ProjectOrchestrator:
 
         PHASE 1 §4.2 — refuse de lancer un plan dont un step n'a pas de success_criterion.
         """
-        project = await self._manager.create_project(mission, timeout_minutes)
+        self._require_legacy_local_execution()
+        project = await self.create_plan(mission, timeout_minutes)
+        return self.start_project(project.id)
+
+    def _require_legacy_local_execution(self) -> None:
+        """Bloque l'ancien worker LLM avant toute mutation ou instanciation.
+
+        ``getattr`` préserve les rares tests de récupération qui construisent
+        l'objet via ``__new__`` sans passer par le constructeur.
+        """
+        if not getattr(self, "_legacy_local_enabled", True):
+            raise ValueError(
+                "Exécution locale des missions libres désactivée. "
+                "Utilise un workflow nommé ou une délégation externe."
+            )
+
+    async def create_plan(self, mission: str, timeout_minutes: int = 30) -> Project:
+        """Prépare et persiste un plan vérifiable sans lancer de worker."""
+        if self._legacy_local_enabled:
+            project = await self._manager.create_project(mission, timeout_minutes)
+        else:
+            project = self._manager.create_external_delegation(mission, timeout_minutes)
+        if self._legacy_local_enabled and _mission_targets_holmes(mission):
+            _seed_holmes_snapshot(project)
+            logger.info("Holmes source snapshot attached", project_id=project.id)
 
         # Validation du plan : chaque step DOIT porter un success_criterion vérifiable.
         try:
@@ -89,6 +163,21 @@ class ProjectOrchestrator:
                 }
             )
             raise
+
+        self._broadcast({"type": "mission_plan_ready", "project": self._project_summary(project)})
+        logger.info("Mission plan ready", id=project.id, steps=len(project.steps))
+        return project
+
+    def start_project(self, project_id: str) -> Project:
+        """Lance explicitement un plan déjà préparé et validé."""
+        project = self._store.load_project(project_id)
+        if not project:
+            raise KeyError(project_id)
+        self._require_legacy_local_execution()
+        if project.status != ProjectStatus.PLANNING:
+            raise ValueError(f"Mission non lançable dans l'état {project.status}")
+        for step in project.steps:
+            validate_step(step)
 
         worker = WorkerAgent(
             project=project,
@@ -115,7 +204,7 @@ class ProjectOrchestrator:
             name=f"worker-{project.id}",
         )
 
-        logger.info("Project launched", id=project.id, steps=len(project.steps))
+        logger.info("Mission launched", id=project.id, steps=len(project.steps))
         return project
 
     # ── Kill switch ───────────────────────────────────────────────────────────
@@ -131,14 +220,14 @@ class ProjectOrchestrator:
 
     async def retry_project(self, project_id: str) -> Project | None:
         """Remet le projet en running depuis la première étape bloquée/failed."""
+        project = self._store.load_project(project_id)
+        if not project:
+            return None
+        self._require_legacy_local_execution()
 
         # Tuer le worker actuel si encore vivant
         if w := self._workers.get(project_id):
             w.kill()
-
-        project = self._store.load_project(project_id)
-        if not project:
-            return None
 
         # Le worker précédent peut avoir été interrompu brutalement. Ses claims
         # persistants ne doivent jamais empêcher le worker de retry de progresser.
@@ -194,12 +283,13 @@ class ProjectOrchestrator:
         et ne réinitialise que le statut global du projet.
         """
 
-        if w := self._workers.get(project_id):
-            w.kill()
-
         project = self._store.load_project(project_id)
         if not project:
             return None
+        self._require_legacy_local_execution()
+
+        if w := self._workers.get(project_id):
+            w.kill()
 
         if not self._store.is_resumable(project):
             logger.warning("Projet non reprennable", id=project_id, status=project.status)
@@ -323,10 +413,14 @@ class ProjectOrchestrator:
 
     # ── Serialization helpers ─────────────────────────────────────────────────
 
-    @staticmethod
-    def _project_summary(project: Project) -> dict:
+    def _project_summary(self, project: Project) -> dict:
         done = sum(1 for s in project.steps if s.status == "done")
         total = len(project.steps)
+        can_start = (
+            self._legacy_local_enabled
+            and project.execution_kind is MissionExecutionKind.LEGACY_LOCAL
+            and project.blocked_reason is None
+        )
         return {
             "id": project.id,
             "title": project.title,
@@ -336,12 +430,28 @@ class ProjectOrchestrator:
             "progress": round(done / total * 100) if total else 0,
             "timeout_minutes": project.timeout_minutes,
             "created_at": project.created_at.isoformat(),
+            "execution_kind": project.execution_kind,
+            "workflow_id": project.workflow_id,
+            "executor_ref": project.executor_ref,
+            "can_start": can_start,
+            "blocked_reason": (
+                project.blocked_reason
+                or (
+                    "Exécution locale des missions libres désactivée."
+                    if not can_start and project.execution_kind is MissionExecutionKind.LEGACY_LOCAL
+                    else None
+                )
+            ),
             "steps": [
                 {
                     "id": s.id,
                     "title": s.title,
                     "status": s.status,
                     "requires_approval": s.requires_approval,
+                    "description": s.description,
+                    "success_criterion": s.success_criterion,
+                    "verification_command": s.verification_command,
+                    "access_level": int(s.access_level),
                     "output": s.output,
                     "error": s.error,
                 }

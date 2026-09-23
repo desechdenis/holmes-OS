@@ -11,6 +11,20 @@ from pathlib import Path
 from loguru import logger
 
 
+def _is_sensitive_path(path: Path) -> bool:
+    """Masque les secrets usuels même s'ils apparaissent par erreur dans un workspace."""
+    lowered_parts = [part.casefold() for part in path.parts]
+    name = path.name.casefold()
+    return (
+        any(part == ".git" or part.startswith(".env") for part in lowered_parts)
+        or "credential" in name
+        or ("token" in name and path.suffix.casefold() == ".json")
+        or ("secret" in name and path.suffix.casefold() in {".json", ".yaml", ".yml"})
+        or path.suffix.casefold() in {".key", ".pem", ".p12", ".pfx"}
+        or name in {"id_rsa", "id_ed25519"}
+    )
+
+
 class SandboxedFileTool:
     def __init__(self, workspace_path: str) -> None:
         self._workspace = Path(workspace_path).resolve()
@@ -25,6 +39,9 @@ class SandboxedFileTool:
 
     def read_file(self, path: str) -> str:
         target = self._safe_path(path)
+        if _is_sensitive_path(target.relative_to(self._workspace)):
+            logger.error("Sensitive workspace read blocked", path=path)
+            raise ValueError(f"ACCÈS REFUSÉ : fichier sensible masqué ({path}).")
         if not target.exists():
             raise FileNotFoundError(f"Fichier non trouvé : {path}")
         return target.read_text(encoding="utf-8")
@@ -43,7 +60,9 @@ class SandboxedFileTool:
         return [
             str(p.relative_to(self._workspace))
             for p in sorted(target.rglob("*"))
-            if p.is_file() and ".jarvis" not in str(p)
+            if p.is_file()
+            and ".jarvis" not in str(p)
+            and not _is_sensitive_path(p.relative_to(self._workspace))
         ]
 
     def delete_file(self, path: str) -> str:

@@ -64,17 +64,19 @@ async def test_nominal_request_uses_pinned_tls_and_timeouts() -> None:
     assert session.call["timeout"].total == 20
 
 
-@pytest.mark.parametrize(
-    "error", [aiohttp.ClientConnectionError("offline"), TimeoutError()]
-)
+@pytest.mark.parametrize("error", [aiohttp.ClientConnectionError("offline"), TimeoutError()])
 @pytest.mark.asyncio
 async def test_unreachable_or_timed_out_holmes_uses_fallback(error: BaseException) -> None:
     client, _session = _client(error)
 
-    async def fallback(text: str, conversation_id: str | None, language: str) -> ConversationReply:
+    async def fallback(
+        text: str, conversation_id: str | None, language: str, context: object
+    ) -> ConversationReply:
         return ConversationReply("Réponse locale.", conversation_id)
 
-    result = await HolmesConversationService(client, fallback).process("Salut", "session-1", "fr")
+    result = await HolmesConversationService(client, fallback).process(
+        "Salut", "session-1", "fr", object()
+    )
     assert result == ConversationReply("Holmes est indisponible. Réponse locale.", "session-1")
 
 

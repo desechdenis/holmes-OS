@@ -89,7 +89,7 @@ class HolmesClient:
         return ConversationReply(answer, returned_id)
 
 
-Fallback = Callable[[str, str | None, str], Awaitable[ConversationReply]]
+Fallback = Callable[[str, str | None, str, object], Awaitable[ConversationReply]]
 
 
 class HolmesConversationService:
@@ -100,11 +100,15 @@ class HolmesConversationService:
         self._fallback = fallback
 
     async def process(
-        self, text: str, conversation_id: str | None, language: str
+        self,
+        text: str,
+        conversation_id: str | None,
+        language: str,
+        context: object,
     ) -> ConversationReply:
         try:
             return await self._client.converse(text, conversation_id, language)
         except HolmesClientError:
-            fallback = await self._fallback(text, conversation_id, language)
+            fallback = await self._fallback(text, conversation_id, language, context)
             suffix = f" {fallback.text}" if fallback.text else ""
             return ConversationReply(f"{UNAVAILABLE_PREFIX}{suffix}", fallback.conversation_id)

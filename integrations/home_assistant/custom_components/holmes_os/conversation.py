@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.intent import IntentResponse
 
@@ -48,13 +48,17 @@ class HolmesConversationEntity(conversation.ConversationEntity):
         return [conversation.MATCH_ALL]
 
     async def _fallback(
-        self, text: str, conversation_id: str | None, language: str
+        self,
+        text: str,
+        conversation_id: str | None,
+        language: str,
+        context: object,
     ) -> ConversationReply:
         result = await conversation.async_converse(
             hass=self.hass,
             text=text,
             conversation_id=conversation_id,
-            context=self._context,
+            context=context if isinstance(context, Context) else Context(),
             language=language,
             agent_id=self._entry.data.get(CONF_FALLBACK_AGENT, DEFAULT_FALLBACK_AGENT),
         )
@@ -62,12 +66,15 @@ class HolmesConversationEntity(conversation.ConversationEntity):
         return ConversationReply(speech, result.conversation_id)
 
     async def _async_handle_message(  # noqa: ANN401 - HA model types vary by release
-        self, user_input: Any, chat_log: Any  # noqa: ANN401
+        self,
+        user_input: Any,
+        chat_log: Any,  # noqa: ANN401
     ) -> conversation.ConversationResult:
         result = await self._service.process(
             user_input.text,
             user_input.conversation_id,
             user_input.language,
+            user_input.context,
         )
         response = IntentResponse(language=user_input.language)
         response.async_set_speech(result.text)

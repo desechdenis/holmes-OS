@@ -124,6 +124,7 @@ class HomeAssistantStateReader:
             (self._mode_entity,)
             + self._presence_entities
             + ((self._weather_entity,) if self._weather_entity else ())
+            + self._calendar_entities
         )
         if not configured:
             return "\n".join(lines)
@@ -175,7 +176,12 @@ class HomeAssistantStateReader:
         """Appeler un service HA uniquement s'il appartient à la liste blanche fermée."""
         if (domain, service) not in READ_ONLY_SERVICES:
             raise ValueError(f"Home Assistant service refused: {domain}.{service}")
-        cache_key = f"{domain}.{service}:{json.dumps(dict(data), sort_keys=True, default=str)}"
+        stable_data = {
+            key: value
+            for key, value in data.items()
+            if key not in {"start_date_time", "end_date_time"}
+        }
+        cache_key = f"{domain}.{service}:{json.dumps(stable_data, sort_keys=True, default=str)}"
         now = monotonic()
         cached = self._service_cache.get(cache_key)
         if cached is not None and now - cached[0] < _CACHE_TTL_SECONDS:

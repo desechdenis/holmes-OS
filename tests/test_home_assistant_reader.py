@@ -102,3 +102,24 @@ async def test_home_assistant_service_responses_are_cached() -> None:
         await reader.call_read_only_service("weather", "get_forecasts", {"type": "daily"})
 
     post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_calendar_cache_ignores_moving_time_window_within_ttl() -> None:
+    reader = HomeAssistantStateReader("https://ha.invalid", "token-factice")
+    post = AsyncMock(return_value={"service_response": {}})
+    first = {
+        "entity_id": ["calendar.test"],
+        "start_date_time": "2026-09-23T10:00:00+02:00",
+        "end_date_time": "2026-09-24T10:00:00+02:00",
+    }
+    second = {
+        **first,
+        "start_date_time": "2026-09-23T10:00:01+02:00",
+        "end_date_time": "2026-09-24T10:00:01+02:00",
+    }
+    with patch.object(reader, "_post_service", post):
+        await reader.call_read_only_service("calendar", "get_events", first)
+        await reader.call_read_only_service("calendar", "get_events", second)
+
+    post.assert_awaited_once()

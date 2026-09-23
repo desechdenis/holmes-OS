@@ -14,7 +14,6 @@ from loguru import logger
 from jarvis.kernel.connectivity import is_offline_mode
 from jarvis.kernel.contracts import CanonicalMemoryStore
 from jarvis.kernel.error_collector import collector  # jrv: autofix
-from jarvis.kernel.holmes_memory import CanonicalMemoryEvent, MemorySource
 from jarvis.kernel.paths import PROMPTS_DIR  # noqa: E402
 from jarvis.providers.llm.base import LLMProvider
 from jarvis.providers.memory.index import MemoryIndex
@@ -75,10 +74,15 @@ class ConsolidationAgent:
             or "Aucun fichier thématique existant."
         )
 
+        # Une affirmation produite par Holmes n'est pas une source factuelle et
+        # ne doit jamais pouvoir se réinjecter comme mémoire canonique. On ne
+        # conserve du message assistant que ses questions, utiles pour comprendre
+        # une réponse elliptique de l'utilisateur ("oui", "1400 ELO", etc.).
+        assistant_context = self._assistant_questions_only(assistant_message)
         prompt = (
             self._prompt_template.replace("{existing_topics}", existing_str)
             .replace("{user_message}", user_message)
-            .replace("{assistant_message}", assistant_message)
+            .replace("{assistant_message}", assistant_context)
         )
 
         response = await self._llm.complete(
@@ -94,13 +98,24 @@ class ConsolidationAgent:
         if self._ingest is not None:
             try:
                 await self._ingest.ingest(
-                    content=f"{self._name} : {user_message}\nJarvis : {assistant_message}",
+                    content=(
+                        f"{self._name} : {user_message}\n"
+                        f"{self._assistant_name} (questions uniquement) : {assistant_context}"
+                    ),
                     source="consolidation_agent",
                     event_type="exchange",
                 )
             except Exception as exc:  # noqa: BLE001
                 collector.warning("JRV-MEM-001", "JRV-MEM-001", cause=exc)
                 logger.warning("Consolidation: ingest Kernel error", error=str(exc))
+
+    @staticmethod
+    def _assistant_questions_only(message: str) -> str:
+        """Retire les assertions du modèle avant toute admission mémoire."""
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", message)
+        questions = [part.strip() for part in sentences if part.strip().endswith("?")]
+        clean = " ".join(questions)
+        return clean or "(aucune question de Holmes dans cet échange)"
 
     async def _apply(self, raw: str) -> None:
         # Strip markdown code fences (```json ... ``` or ``` ... ```)
@@ -143,41 +158,18 @@ class ConsolidationAgent:
                 description=pointer,
             )
             logger.info("Consolidated", file=filename, key=key)
-            await self._write_canonical_event(
-                filename=filename,
-                section=section,
-                key=key,
-                pointer=pointer,
-                content=content,
-            )
-
-    async def _write_canonical_event(
-        self,
-        *,
-        filename: str,
-        section: str,
-        key: str,
-        pointer: str,
-        content: str,
-    ) -> None:
-        """Réplique vers Soul uniquement une mémoire déjà consolidée."""
-        if self._canonical_memory is None:
-            return
-        try:
-            await self._canonical_memory.append_event(
-                CanonicalMemoryEvent(
-                    source=MemorySource.CONVERSATION,
-                    content=(
-                        f"Mémoire durable consolidée : {pointer}\n\n"
-                        f"## Contenu canonique\n\n{content.strip()}"
-                    ),
-                    metadata={"file": filename, "section": section, "key": key},
+            # Une consolidation est une proposition dérivée par le LLM, pas une
+            # référence validée par l'utilisateur. Elle reste disponible dans
+            # les topics locaux, mais ne peut plus être promue automatiquement
+            # dans Soul. Le port est conservé pendant la migration afin de ne
+            # pas casser la composition du Container.
+            if self._canonical_memory is not None:
+                logger.info(
+                    "Consolidation kept local pending human review",
+                    file=filename,
+                    section=section,
+                    key=key,
                 )
-            )
-        except Exception as exc:  # noqa: BLE001
-            # Soul ne doit jamais empêcher la consolidation locale déjà validée.
-            collector.warning("JRV-MEM-001", "JRV-MEM-001", cause=exc)
-            logger.warning("Consolidation: canonical Soul write failed", error=str(exc))
 
 
 class CrossSessionRecall:

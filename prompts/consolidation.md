@@ -25,7 +25,10 @@ Ex : Holmes demande "Tu joues à quel niveau aux échecs ?" → user répond "cl
 
 ## Échange à analyser
 **User :** {user_message}
-**Holmes :** {assistant_message}
+**Questions de Holmes uniquement :** {assistant_message}
+
+Les affirmations de Holmes ont été supprimées par le code avant ce prompt :
+elles ne constituent jamais une source et ne doivent jamais être reconstruites.
 
 ## Instructions
 Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans explication autour.

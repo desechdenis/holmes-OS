@@ -161,7 +161,7 @@ async def _search_all_projects(name: str, arguments: dict) -> str:
     assert name == "search_notes"
     assert arguments == {
         "query": "Body",
-        "page_size": 8,
+        "page_size": 5,
         "output_format": "text",
         "search_all_projects": True,
     }

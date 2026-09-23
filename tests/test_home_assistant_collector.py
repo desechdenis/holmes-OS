@@ -18,7 +18,7 @@ class FakeCanonicalMemory:
 
 
 @pytest.mark.asyncio
-async def test_critical_home_assistant_event_is_written_once_to_canonical_memory() -> None:
+async def test_critical_home_assistant_event_is_not_promoted_to_canonical_memory() -> None:
     memory = FakeCanonicalMemory()
     collector = HomeAssistantCollector(canonical_memory=memory)
     item = ContextItem(
@@ -40,7 +40,5 @@ async def test_critical_home_assistant_event_is_written_once_to_canonical_memory
     await collector._record_critical_event(item, state)
     await collector._record_critical_event(item, state)
 
-    assert len(memory.events) == 1
-    event = memory.events[0]
-    assert event.source.value == "home_assistant"
-    assert event.metadata["entity_id"] == "binary_sensor.leak_kitchen"
+    assert memory.events == []
+    assert len(collector._recorded_event_ids) == 1

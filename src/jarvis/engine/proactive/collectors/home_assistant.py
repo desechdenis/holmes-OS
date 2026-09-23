@@ -15,7 +15,6 @@ from jarvis.engine.proactive.schemas import ContextItem, ItemType, Priority
 from jarvis.kernel.connectivity import is_offline_mode
 from jarvis.kernel.contracts import CanonicalMemoryStore
 from jarvis.kernel.error_collector import collector  # jrv: autofix
-from jarvis.kernel.holmes_memory import CanonicalMemoryEvent, MemorySource
 from jarvis.kernel.settings import settings
 
 
@@ -89,10 +88,12 @@ class HomeAssistantCollector(CollectorBase):
             return []
 
     async def _record_critical_event(self, item: ContextItem, state: dict) -> None:
-        """Mémorise une alerte critique une seule fois par changement d'état."""
-        if self._canonical_memory is None:
-            return
+        """Trace localement le signal sans le promouvoir en référence Soul.
 
+        Le ``ContextItem`` retourné par le collecteur reste la preuve utilisée
+        par le moteur d'initiatives. Une alerte HA est un état vivant et ne doit
+        pas devenir une vérité durable sans validation humaine.
+        """
         entity_id = str(state.get("entity_id", "unknown"))
         changed_at = str(state.get("last_changed", ""))
         fingerprint = f"{entity_id}|{state.get('state', '')}|{changed_at}"
@@ -100,20 +101,11 @@ class HomeAssistantCollector(CollectorBase):
         if event_id in self._recorded_event_ids:
             return
 
-        event = CanonicalMemoryEvent(
+        self._recorded_event_ids.add(event_id)
+        logger.debug(
+            "Home Assistant critical signal kept as initiative evidence",
             event_id=event_id,
-            source=MemorySource.HOME_ASSISTANT,
-            content=f"{item.title}\n\n{item.summary}",
-            metadata={
-                "entity_id": entity_id,
-                "state": state.get("state", ""),
-                "last_changed": changed_at,
-                "device_class": state.get("attributes", {}).get("device_class", ""),
-            },
+            entity_id=entity_id,
+            state=state.get("state", ""),
+            title=item.title,
         )
-        try:
-            await self._canonical_memory.append_event(event)
-            self._recorded_event_ids.add(event_id)
-        except Exception as exc:  # noqa: BLE001 — l'alerte UI reste prioritaire
-            collector.warning("JRV-PRO-001", "JRV-PRO-001", cause=exc)
-            logger.warning("Home Assistant → Soul write failed", error=str(exc))

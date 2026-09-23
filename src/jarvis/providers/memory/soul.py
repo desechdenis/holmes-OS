@@ -331,13 +331,13 @@ class SoulRecall:
         client: SoulToolClient,
         *,
         project: str | None = None,
-        max_chars: int = 14_000,
+        max_chars: int = 6_000,
     ) -> None:
         self._client = client
         self._project = project
         self._max_chars = max_chars
 
-    async def recall(self, query: str, k: int = 8) -> str | None:
+    async def recall(self, query: str, k: int = 5) -> str | None:
         query = self._normalize_query(query)
         if not query:
             return None
@@ -394,7 +394,7 @@ class SoulRecall:
             return None
 
         reference_query = " ".join(reversed(terms[-2:]))
-        result = await self._search(reference_query, k=8)
+        result = await self._search(reference_query, k=5)
         if not isinstance(result, str):
             return None
         permalink = self._matching_permalink(result, focus)

@@ -45,6 +45,18 @@ class _Recall:
         return "ancienne donnée mémoire"
 
 
+class _HomeAssistantServices:
+    async def weather_forecast(self) -> str:
+        return "- 2026-09-24 : sunny, 20°"
+
+    async def calendar_events(self, days_ahead: int = 7) -> str:
+        assert days_ahead == 7
+        return "- 2026-09-24T14:00:00+02:00 : rendez-vous"
+
+    async def lookup(self, query: str, limit: int = 6) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_calendar_success_has_authoritative_fresh_evidence() -> None:
     calendar = _Calendar(ToolResult("Jeudi 14 h — dentiste"))
@@ -72,6 +84,29 @@ async def test_calendar_failure_never_falls_back_to_historical_soul() -> None:
     assert result.intent is IntentKind.CALENDAR_READ
     assert "indisponible" in (result.content or "")
     assert recall.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_weather_forecast_is_read_deterministically_from_home_assistant() -> None:
+    router = DeterministicIntentRouter(home_state=_HomeAssistantServices())  # type: ignore[arg-type]
+
+    result = await router.resolve(_request("Quel temps fera-t-il demain ?"))
+
+    assert result.intent is IntentKind.WEATHER_READ
+    assert result.status is ActionStatus.SUCCEEDED
+    assert "Home Assistant" in (result.content or "")
+    assert "sunny" in (result.content or "")
+
+
+@pytest.mark.asyncio
+async def test_calendar_events_are_read_deterministically_from_home_assistant() -> None:
+    router = DeterministicIntentRouter(home_state=_HomeAssistantServices())  # type: ignore[arg-type]
+
+    result = await router.resolve(_request("Quel est mon agenda demain ?"))
+
+    assert result.intent is IntentKind.CALENDAR_READ
+    assert result.status is ActionStatus.SUCCEEDED
+    assert "rendez-vous" in (result.content or "")
 
 
 @dataclass

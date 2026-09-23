@@ -79,6 +79,11 @@ def is_live_calendar_request(message: str) -> bool:
     )
 
 
+def is_live_weather_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(term in lowered for term in ("météo", "meteo", "prévision", "temps fera"))
+
+
 class DeterministicIntentRouter:
     """Exécute les intentions bornées avant tout appel conversationnel."""
 
@@ -123,6 +128,60 @@ class DeterministicIntentRouter:
             )
 
         evidence: list[Evidence] = []
+        weather_forecast = getattr(self._home_state, "weather_forecast", None)
+        if callable(weather_forecast) and is_live_weather_request(request.text):
+            try:
+                forecast = await weather_forecast()
+                if forecast:
+                    return ActionResult(
+                        trace_id=request.trace_id,
+                        intent=IntentKind.WEATHER_READ,
+                        status=ActionStatus.SUCCEEDED,
+                        content="Voici les prévisions de Home Assistant :\n" + forecast,
+                    )
+                return ActionResult(
+                    trace_id=request.trace_id,
+                    intent=IntentKind.WEATHER_READ,
+                    status=ActionStatus.FAILED,
+                    content="Les prévisions Home Assistant ne sont pas disponibles.",
+                )
+            except Exception as exc:  # noqa: BLE001 — erreur rendue à l'utilisateur
+                collector.warning("JRV-GWY-001", "JRV-GWY-001", cause=exc)
+                logger.warning("Home Assistant weather lookup failed", error=str(exc))
+                return ActionResult(
+                    trace_id=request.trace_id,
+                    intent=IntentKind.WEATHER_READ,
+                    status=ActionStatus.FAILED,
+                    content="Home Assistant ne répond pas pour les prévisions.",
+                )
+
+        ha_calendar = getattr(self._home_state, "calendar_events", None)
+        if callable(ha_calendar) and is_live_calendar_request(request.text):
+            try:
+                events = await ha_calendar(days_ahead=7)
+                if events:
+                    return ActionResult(
+                        trace_id=request.trace_id,
+                        intent=IntentKind.CALENDAR_READ,
+                        status=ActionStatus.SUCCEEDED,
+                        content="Voici les événements de Home Assistant :\n" + events,
+                    )
+                return ActionResult(
+                    trace_id=request.trace_id,
+                    intent=IntentKind.CALENDAR_READ,
+                    status=ActionStatus.FAILED,
+                    content="Les événements Home Assistant ne sont pas disponibles.",
+                )
+            except Exception as exc:  # noqa: BLE001 — erreur rendue à l'utilisateur
+                collector.warning("JRV-GWY-001", "JRV-GWY-001", cause=exc)
+                logger.warning("Home Assistant calendar lookup failed", error=str(exc))
+                return ActionResult(
+                    trace_id=request.trace_id,
+                    intent=IntentKind.CALENDAR_READ,
+                    status=ActionStatus.FAILED,
+                    content="Home Assistant ne répond pas pour l'agenda.",
+                )
+
         if self._calendar is not None and is_live_calendar_request(request.text):
             try:
                 calendar_result = await self._calendar.execute(days_ahead=7)

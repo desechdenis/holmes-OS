@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from jarvis.providers.home_assistant import HomeAssistantStateReader
+from jarvis.providers.home_assistant import READ_ONLY_SERVICES, HomeAssistantStateReader
 
 
 def test_home_assistant_reader_only_targets_home_state_questions() -> None:
@@ -68,3 +68,15 @@ async def test_ambient_context_falls_back_cleanly_when_ha_is_unavailable() -> No
 
     assert "Date locale" in context
     assert "Home Assistant : indisponible" in context
+
+
+@pytest.mark.asyncio
+async def test_read_only_service_allowlist_refuses_every_other_service() -> None:
+    reader = HomeAssistantStateReader("https://ha.invalid", "token-factice")
+
+    assert READ_ONLY_SERVICES == {
+        ("weather", "get_forecasts"),
+        ("calendar", "get_events"),
+    }
+    with pytest.raises(ValueError, match="refused"):
+        await reader.call_read_only_service("light", "turn_on", {"entity_id": "light.test"})

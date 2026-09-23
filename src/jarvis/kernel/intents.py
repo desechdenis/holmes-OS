@@ -31,6 +31,7 @@ class IntentKind(StrEnum):
     MISSION_START = "mission_start"
     TASK_COMMAND = "task_command"
     CALENDAR_READ = "calendar_read"
+    WEATHER_READ = "weather_read"
     SOUL_FACT = "soul_fact"
     HOME_STATE = "home_state"
     CONVERSATION = "conversation"

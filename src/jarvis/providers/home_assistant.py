@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+
+READ_ONLY_SERVICES = frozenset(
+    {
+        ("weather", "get_forecasts"),
+        ("calendar", "get_events"),
+    }
+)
 
 
 class HomeAssistantStateReader:
@@ -131,6 +138,77 @@ class HomeAssistantStateReader:
                 value = f"{value}, {attrs['temperature']} {unit}".strip()
             lines.append(f"- {name} : {value}")
         return "\n".join(lines)
+
+    async def call_read_only_service(
+        self, domain: str, service: str, data: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Appeler un service HA uniquement s'il appartient à la liste blanche fermée."""
+        if (domain, service) not in READ_ONLY_SERVICES:
+            raise ValueError(f"Home Assistant service refused: {domain}.{service}")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        url = f"{self._base_url}/api/services/{domain}/{service}"
+        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
+            response = await client.post(url, params={"return_response": "true"}, json=dict(data))
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, Mapping) else {}
+
+    async def weather_forecast(self) -> str | None:
+        if not self._weather_entity:
+            return None
+        payload = await self.call_read_only_service(
+            "weather",
+            "get_forecasts",
+            {"entity_id": self._weather_entity, "type": "daily"},
+        )
+        service_response = payload.get("service_response", {})
+        service_response = service_response if isinstance(service_response, Mapping) else {}
+        entity_result = service_response.get(self._weather_entity, {})
+        entity_result = entity_result if isinstance(entity_result, Mapping) else {}
+        forecast = entity_result.get("forecast", [])
+        if not isinstance(forecast, list) or not forecast:
+            return None
+        lines = []
+        for item in forecast[:4]:
+            if not isinstance(item, Mapping):
+                continue
+            when = str(item.get("datetime", "date inconnue"))[:10]
+            condition = str(item.get("condition", "état inconnu"))
+            temperature = item.get("temperature")
+            suffix = f", {temperature}°" if temperature is not None else ""
+            lines.append(f"- {when} : {condition}{suffix}")
+        return "\n".join(lines) or None
+
+    async def calendar_events(self, days_ahead: int = 7) -> str | None:
+        if not self._calendar_entities:
+            return None
+        start = datetime.now().astimezone()
+        end = start + timedelta(days=days_ahead)
+        payload = await self.call_read_only_service(
+            "calendar",
+            "get_events",
+            {
+                "entity_id": list(self._calendar_entities),
+                "start_date_time": start.isoformat(),
+                "end_date_time": end.isoformat(),
+            },
+        )
+        service_response = payload.get("service_response", {})
+        service_response = service_response if isinstance(service_response, Mapping) else {}
+        lines: list[str] = []
+        for entity_id in self._calendar_entities:
+            entity_result = service_response.get(entity_id, {})
+            entity_result = entity_result if isinstance(entity_result, Mapping) else {}
+            events = entity_result.get("events", [])
+            if not isinstance(events, list):
+                continue
+            for event in events:
+                if not isinstance(event, Mapping):
+                    continue
+                start_value = str(event.get("start", "date inconnue"))
+                summary = str(event.get("summary", "événement"))
+                lines.append(f"- {start_value} : {summary}")
+        return "\n".join(lines[:8]) or None
 
     @classmethod
     def is_relevant(cls, query: str) -> bool:

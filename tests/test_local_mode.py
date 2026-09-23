@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from typing import Never
 from unittest.mock import AsyncMock, MagicMock
 
@@ -103,6 +104,27 @@ def test_ha_conversation_uses_a_small_stable_prompt(local_mode: None) -> None:
         first.split("=== CONTEXTE DYNAMIQUE ===", 1)[0]
         == second.split("=== CONTEXTE DYNAMIQUE ===", 1)[0]
     )
+
+
+def test_ha_conversation_excludes_long_user_profile_files(local_mode: None, tmp_path: Path) -> None:
+    from jarvis.kernel.settings import settings
+
+    profile = tmp_path / "profile.md"
+    preferences = tmp_path / "preferences.md"
+    profile.write_text("PROFIL_TRÈS_LONG " * 500)
+    preferences.write_text("PRÉFÉRENCES_TRÈS_LONGUES " * 500)
+    agent = Agent(
+        settings=settings,
+        llm=_MockLLM(),
+        user_model_path=profile,
+        user_prefs_path=preferences,
+    )
+
+    system = agent._build_system(ha_conversation=True)
+
+    assert "PROFIL_TRÈS_LONG" not in system
+    assert "PRÉFÉRENCES_TRÈS_LONGUES" not in system
+    assert len(system) < 2_000
 
 
 def test_local_voice_profile_never_promises_persistent_memory(local_mode: None) -> None:

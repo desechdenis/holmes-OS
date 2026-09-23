@@ -144,12 +144,20 @@ class Agent:
                 f"{recall_summary}"
             )
 
-        if self._user_model_path is not None and self._user_model_path.exists():
+        if (
+            not ha_conversation
+            and self._user_model_path is not None
+            and self._user_model_path.exists()
+        ):
             model_text = self._user_model_path.read_text(encoding="utf-8").strip()
             if model_text:
                 dynamic_parts.append(f"## Modèle utilisateur\n\n{model_text}")
 
-        if self._user_prefs_path is not None and self._user_prefs_path.exists():
+        if (
+            not ha_conversation
+            and self._user_prefs_path is not None
+            and self._user_prefs_path.exists()
+        ):
             prefs = self._user_prefs_path.read_text(encoding="utf-8").strip()
             if prefs:
                 dynamic_parts.append(f"## Préférences {firstname}\n\n{prefs}")

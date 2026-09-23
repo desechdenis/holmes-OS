@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from jarvis.capabilities.tools.base import ToolResult
-from jarvis.engine.intent_router import DeterministicIntentRouter
+from jarvis.engine.intent_router import DeterministicIntentRouter, needs_soul_recall
 from jarvis.kernel.intents import (
     ActionStatus,
     IntentChannel,
@@ -156,3 +156,10 @@ async def test_unknown_intent_is_passthrough_with_same_trace_id() -> None:
     assert result.status is ActionStatus.PASSTHROUGH
     assert result.intent is IntentKind.CONVERSATION
     assert result.trace_id == "trace-test"
+
+
+def test_soul_recall_heuristic_only_targets_memory_questions() -> None:
+    assert needs_soul_recall("Tu te souviens de mon projet ?")
+    assert needs_soul_recall("Combien de CT dans Body ?")
+    assert not needs_soul_recall("Bonjour Holmes")
+    assert not needs_soul_recall("Quel est le mode actuel de la maison ?")

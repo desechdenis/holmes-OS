@@ -105,14 +105,14 @@ async def test_gateway_queries_soul_for_each_message_in_a_session() -> None:
         recall=soul,  # type: ignore[arg-type]
     )
 
-    session, _, response = await gateway.handle("maison", stream=False)
+    session, _, response = await gateway.handle("souviens-toi de ma maison", stream=False)
     assert isinstance(response, str)
-    await gateway.handle("body", session_id=str(session.id), stream=False)
+    await gateway.handle("que sais-tu de Body", session_id=str(session.id), stream=False)
 
-    assert soul.queries == ["maison", "body"]
+    assert soul.queries == ["souviens-toi de ma maison", "que sais-tu de Body"]
     assert agent.contexts == [
-        "## Mémoire Soul\nSoul: maison",
-        "## Mémoire Soul\nSoul: body",
+        "## Mémoire Soul\nSoul: souviens-toi de ma maison",
+        "## Mémoire Soul\nSoul: que sais-tu de Body",
     ]
 
 
@@ -153,7 +153,6 @@ async def test_gateway_injects_read_only_home_assistant_state() -> None:
     await gateway.handle("Quelle est la température du salon ?")
 
     assert agent.contexts == [
-        "## Mémoire Soul\nSoul: Quelle est la température du salon ?\n\n"
         "## État Home Assistant en direct\n- Température Salon : 21 °C"
     ]
 
@@ -213,7 +212,7 @@ async def test_gateway_does_not_route_weather_tomorrow_to_calendar() -> None:
 
     await gateway.handle("Quel temps fera-t-il demain ?")
 
-    assert agent.contexts == ["## Mémoire Soul\nSoul: Quel temps fera-t-il demain ?"]
+    assert agent.contexts == [None]
 
 
 @pytest.mark.asyncio

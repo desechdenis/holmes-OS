@@ -6,9 +6,11 @@ planification et de confirmation distincte.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -19,6 +21,7 @@ READ_ONLY_SERVICES = frozenset(
         ("calendar", "get_events"),
     }
 )
+_CACHE_TTL_SECONDS = 60.0
 
 
 class HomeAssistantStateReader:
@@ -88,20 +91,30 @@ class HomeAssistantStateReader:
         self._presence_entities = self._entity_list(presence_entities)
         self._weather_entity = weather_entity.strip()
         self._calendar_entities = self._entity_list(calendar_entities)
+        self._states_cache: tuple[float, list[Mapping[str, Any]]] | None = None
+        self._service_cache: dict[str, tuple[float, Mapping[str, Any]]] = {}
 
     @staticmethod
     def _entity_list(value: str) -> tuple[str, ...]:
         return tuple(item.strip() for item in value.split(",") if item.strip())
 
-    async def _states(self) -> list[Mapping[str, Any]]:
+    async def _fetch_states(self) -> list[Mapping[str, Any]]:
         headers = {"Authorization": f"Bearer {self._token}"}
-        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=1.0, headers=headers) as client:
             response = await client.get(f"{self._base_url}/api/states")
         response.raise_for_status()
         states = response.json()
         if not isinstance(states, list):
             return []
         return [state for state in states if isinstance(state, Mapping)]
+
+    async def _states(self) -> list[Mapping[str, Any]]:
+        now = monotonic()
+        if self._states_cache is not None and now - self._states_cache[0] < _CACHE_TTL_SECONDS:
+            return self._states_cache[1]
+        states = await self._fetch_states()
+        self._states_cache = (now, states)
+        return states
 
     async def ambient_context(self) -> str:
         """Retourner quelques lignes de présent, sans inventer de valeur HA."""
@@ -137,7 +150,24 @@ class HomeAssistantStateReader:
                 unit = str(attrs.get("temperature_unit") or "")
                 value = f"{value}, {attrs['temperature']} {unit}".strip()
             lines.append(f"- {name} : {value}")
+        try:
+            events = await self.calendar_events(days_ahead=1)
+            if events:
+                lines.append(f"- Agenda : {events.splitlines()[0].removeprefix('- ')}")
+        except (httpx.HTTPError, TimeoutError):
+            pass
         return "\n".join(lines)
+
+    async def _post_service(
+        self, domain: str, service: str, data: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        headers = {"Authorization": f"Bearer {self._token}"}
+        url = f"{self._base_url}/api/services/{domain}/{service}"
+        async with httpx.AsyncClient(timeout=1.0, headers=headers) as client:
+            response = await client.post(url, params={"return_response": "true"}, json=dict(data))
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, Mapping) else {}
 
     async def call_read_only_service(
         self, domain: str, service: str, data: Mapping[str, Any]
@@ -145,13 +175,14 @@ class HomeAssistantStateReader:
         """Appeler un service HA uniquement s'il appartient à la liste blanche fermée."""
         if (domain, service) not in READ_ONLY_SERVICES:
             raise ValueError(f"Home Assistant service refused: {domain}.{service}")
-        headers = {"Authorization": f"Bearer {self._token}"}
-        url = f"{self._base_url}/api/services/{domain}/{service}"
-        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
-            response = await client.post(url, params={"return_response": "true"}, json=dict(data))
-        response.raise_for_status()
-        payload = response.json()
-        return payload if isinstance(payload, Mapping) else {}
+        cache_key = f"{domain}.{service}:{json.dumps(dict(data), sort_keys=True, default=str)}"
+        now = monotonic()
+        cached = self._service_cache.get(cache_key)
+        if cached is not None and now - cached[0] < _CACHE_TTL_SECONDS:
+            return cached[1]
+        payload = await self._post_service(domain, service, data)
+        self._service_cache[cache_key] = (now, payload)
+        return payload
 
     async def weather_forecast(self) -> str | None:
         if not self._weather_entity:

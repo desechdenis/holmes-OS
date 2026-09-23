@@ -80,3 +80,25 @@ async def test_read_only_service_allowlist_refuses_every_other_service() -> None
     }
     with pytest.raises(ValueError, match="refused"):
         await reader.call_read_only_service("light", "turn_on", {"entity_id": "light.test"})
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_states_are_cached_for_sixty_seconds() -> None:
+    reader = HomeAssistantStateReader("https://ha.invalid", "token-factice")
+    fetch = AsyncMock(return_value=[])
+    with patch.object(reader, "_fetch_states", fetch):
+        await reader._states()
+        await reader._states()
+
+    fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_service_responses_are_cached() -> None:
+    reader = HomeAssistantStateReader("https://ha.invalid", "token-factice")
+    post = AsyncMock(return_value={"service_response": {}})
+    with patch.object(reader, "_post_service", post):
+        await reader.call_read_only_service("weather", "get_forecasts", {"type": "daily"})
+        await reader.call_read_only_service("weather", "get_forecasts", {"type": "daily"})
+
+    post.assert_awaited_once()

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -85,6 +86,30 @@ def is_live_weather_request(message: str) -> bool:
     return any(term in lowered for term in ("météo", "meteo", "prévision", "temps fera"))
 
 
+def needs_soul_recall(message: str) -> bool:
+    lowered = f" {clean_spoken_command(message).casefold()} "
+    return any(
+        term in lowered
+        for term in (
+            "soul",
+            "mémoire",
+            "memoire",
+            "souviens",
+            "souvenir",
+            "rappelle-toi",
+            "je t'ai dit",
+            "préférence",
+            "preference",
+            "habitude",
+            "mon profil",
+            "body",
+            "homelab",
+            "conteneur",
+            " ct ",
+        )
+    )
+
+
 class DeterministicIntentRouter:
     """Exécute les intentions bornées avant tout appel conversationnel."""
 
@@ -132,7 +157,8 @@ class DeterministicIntentRouter:
         weather_forecast = getattr(self._home_state, "weather_forecast", None)
         if callable(weather_forecast) and is_live_weather_request(request.text):
             try:
-                forecast = await weather_forecast()
+                async with asyncio.timeout(1.0):
+                    forecast = await weather_forecast()
                 if forecast:
                     return ActionResult(
                         trace_id=request.trace_id,
@@ -159,7 +185,8 @@ class DeterministicIntentRouter:
         ha_calendar = getattr(self._home_state, "calendar_events", None)
         if callable(ha_calendar) and is_live_calendar_request(request.text):
             try:
-                events = await ha_calendar(days_ahead=7)
+                async with asyncio.timeout(1.0):
+                    events = await ha_calendar(days_ahead=7)
                 if events:
                     return ActionResult(
                         trace_id=request.trace_id,
@@ -225,7 +252,8 @@ class DeterministicIntentRouter:
             if callable(ambient_context):
                 try:
                     with metric_stage("ha_context"):
-                        ambient = await ambient_context()
+                        async with asyncio.timeout(1.0):
+                            ambient = await ambient_context()
                     if ambient:
                         evidence.append(
                             Evidence(
@@ -239,12 +267,11 @@ class DeterministicIntentRouter:
                     collector.warning("JRV-GWY-001", "JRV-GWY-001", cause=exc)
                     logger.warning("Home Assistant ambient context failed", error=str(exc))
 
-        allow_recall = bool(request.metadata.get("allow_recall", True))
-        recall_each_turn = bool(getattr(self._recall, "always_recall", False))
-        if self._recall is not None and (allow_recall or recall_each_turn):
+        if self._recall is not None and needs_soul_recall(request.text):
             try:
                 with metric_stage("soul"):
-                    recall_summary = await self._recall.recall(request.text)
+                    async with asyncio.timeout(1.0):
+                        recall_summary = await self._recall.recall(request.text)
                 if recall_summary:
                     evidence.append(
                         Evidence(
@@ -260,7 +287,8 @@ class DeterministicIntentRouter:
         if self._home_state is not None:
             try:
                 with metric_stage("ha_context"):
-                    home_context = await self._home_state.lookup(request.text)
+                    async with asyncio.timeout(1.0):
+                        home_context = await self._home_state.lookup(request.text)
                 if home_context:
                     evidence.append(
                         Evidence(

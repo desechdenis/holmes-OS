@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "[HOLMES-OS] Holmes OS",
+        "description": "Connect Holmes with strict SHA-256 certificate pinning.",
+        "data": {
+          "url": "Holmes HTTPS URL",
+          "token": "API token",
+          "certificate_fingerprint": "SHA-256 certificate fingerprint",
+          "fallback_agent": "Fallback conversation agent"
+        }
+      }
+    },
+    "error": {
+      "invalid_fingerprint": "Enter the 64 hexadecimal characters of the SHA-256 fingerprint."
+    }
+  }
+}

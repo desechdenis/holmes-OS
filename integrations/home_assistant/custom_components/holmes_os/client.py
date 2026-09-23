@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+
+_LOGGER = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_SECONDS = 2
 TOTAL_TIMEOUT_SECONDS = 20
@@ -108,7 +111,13 @@ class HolmesConversationService:
     ) -> ConversationReply:
         try:
             return await self._client.converse(text, conversation_id, language)
+        except HolmesAuthenticationError:
+            _LOGGER.warning("Repli conversationnel : jeton Holmes refusé")
+        except HolmesUnavailableError:
+            _LOGGER.warning("Repli conversationnel : Holmes injoignable ou hors délai")
         except HolmesClientError:
-            fallback = await self._fallback(text, conversation_id, language, context)
-            suffix = f" {fallback.text}" if fallback.text else ""
-            return ConversationReply(f"{UNAVAILABLE_PREFIX}{suffix}", fallback.conversation_id)
+            _LOGGER.warning("Repli conversationnel : erreur Holmes")
+
+        fallback = await self._fallback(text, conversation_id, language, context)
+        suffix = f" {fallback.text}" if fallback.text else ""
+        return ConversationReply(f"{UNAVAILABLE_PREFIX}{suffix}", fallback.conversation_id)

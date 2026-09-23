@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import aiohttp
@@ -66,7 +67,9 @@ async def test_nominal_request_uses_pinned_tls_and_timeouts() -> None:
 
 @pytest.mark.parametrize("error", [aiohttp.ClientConnectionError("offline"), TimeoutError()])
 @pytest.mark.asyncio
-async def test_unreachable_or_timed_out_holmes_uses_fallback(error: BaseException) -> None:
+async def test_unreachable_or_timed_out_holmes_uses_fallback(
+    error: BaseException, caplog: pytest.LogCaptureFixture
+) -> None:
     client, _session = _client(error)
 
     async def fallback(
@@ -78,6 +81,29 @@ async def test_unreachable_or_timed_out_holmes_uses_fallback(error: BaseExceptio
         "Salut", "session-1", "fr", object()
     )
     assert result == ConversationReply("Holmes est indisponible. Réponse locale.", "session-1")
+    assert "Holmes injoignable ou hors délai" in caplog.text
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rejected_token_fallback_logs_without_disclosing_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _session = _client(_Response(401, {}))
+
+    async def fallback(
+        text: str, conversation_id: str | None, language: str, context: object
+    ) -> ConversationReply:
+        return ConversationReply("Réponse locale.", conversation_id)
+
+    with caplog.at_level(logging.WARNING):
+        result = await HolmesConversationService(client, fallback).process(
+            "Salut", "session-1", "fr", object()
+        )
+
+    assert result.text.startswith("Holmes est indisponible.")
+    assert "jeton Holmes refusé" in caplog.text
+    assert "secret" not in caplog.text
 
 
 @pytest.mark.asyncio

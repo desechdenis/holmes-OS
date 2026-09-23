@@ -13,6 +13,7 @@ from typing import Protocol
 from loguru import logger
 
 from jarvis.capabilities.tools.tasks import execute_task_command
+from jarvis.engine.conversation_metrics import metric_stage
 from jarvis.kernel.contracts import CalendarReadTool, CrossSessionRecall, HomeStateLookup
 from jarvis.kernel.error_collector import collector
 from jarvis.kernel.intents import (
@@ -223,7 +224,8 @@ class DeterministicIntentRouter:
             ambient_context = getattr(self._home_state, "ambient_context", None)
             if callable(ambient_context):
                 try:
-                    ambient = await ambient_context()
+                    with metric_stage("ha_context"):
+                        ambient = await ambient_context()
                     if ambient:
                         evidence.append(
                             Evidence(
@@ -241,7 +243,8 @@ class DeterministicIntentRouter:
         recall_each_turn = bool(getattr(self._recall, "always_recall", False))
         if self._recall is not None and (allow_recall or recall_each_turn):
             try:
-                recall_summary = await self._recall.recall(request.text)
+                with metric_stage("soul"):
+                    recall_summary = await self._recall.recall(request.text)
                 if recall_summary:
                     evidence.append(
                         Evidence(
@@ -256,7 +259,8 @@ class DeterministicIntentRouter:
 
         if self._home_state is not None:
             try:
-                home_context = await self._home_state.lookup(request.text)
+                with metric_stage("ha_context"):
+                    home_context = await self._home_state.lookup(request.text)
                 if home_context:
                     evidence.append(
                         Evidence(

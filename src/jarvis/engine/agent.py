@@ -11,6 +11,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from jarvis.engine.conversation_metrics import metric_stage
 from jarvis.engine.session import Session
 from jarvis.kernel.contracts import (
     LLMProvider,
@@ -258,7 +259,8 @@ class Agent:
         est entièrement consommé ; None si le provider ne supporte pas les outils.
         """
         session.add_message("user", user_message)
-        system = self._build_system(notifications=notifications, recall_summary=recall_summary)
+        with metric_stage("prompt_build"):
+            system = self._build_system(notifications=notifications, recall_summary=recall_summary)
         logger.debug("Agent routing stream", session_id=str(session.id))
 
         if self.has_tools() and hasattr(self._llm, "stream_with_capture"):

@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import httpx
 from loguru import logger
 
+from jarvis.engine.conversation_metrics import metric_stage, record_tokens
 from jarvis.kernel.error_collector import collector  # jrv: autofix
 from jarvis.kernel.settings import settings
 from jarvis.providers.llm.base import LLMProvider
@@ -139,44 +140,51 @@ class OllamaProvider(LLMProvider):
 
     async def _stream(self, payload: dict) -> AsyncIterator[str]:
         _timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)
-        async with httpx.AsyncClient(timeout=_timeout) as client:
-            async with client.stream("POST", f"{self._base_url}/api/chat", json=payload) as resp:
-                resp.raise_for_status()
-                in_think = False
-                think_buf = ""
+        with metric_stage("ollama"):
+            async with httpx.AsyncClient(timeout=_timeout) as client:
+                async with client.stream(
+                    "POST", f"{self._base_url}/api/chat", json=payload
+                ) as resp:
+                    resp.raise_for_status()
+                    in_think = False
+                    think_buf = ""
 
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    delta: str = data.get("message", {}).get("content", "")
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        delta: str = data.get("message", {}).get("content", "")
 
-                    if delta:
-                        # Filtre <think>...</think> token par token (sécurité)
-                        think_buf += delta
-                        output = ""
-                        while think_buf:
-                            if in_think:
-                                end = think_buf.find("</think>")
-                                if end == -1:
-                                    think_buf = ""
-                                    break
-                                think_buf = think_buf[end + len("</think>") :]
-                                in_think = False
-                            else:
-                                start = think_buf.find("<think>")
-                                if start == -1:
-                                    output += think_buf
-                                    think_buf = ""
-                                    break
-                                output += think_buf[:start]
-                                think_buf = think_buf[start + len("<think>") :]
-                                in_think = True
-                        if output:
-                            yield output
+                        if delta:
+                            # Filtre <think>...</think> token par token (sécurité)
+                            think_buf += delta
+                            output = ""
+                            while think_buf:
+                                if in_think:
+                                    end = think_buf.find("</think>")
+                                    if end == -1:
+                                        think_buf = ""
+                                        break
+                                    think_buf = think_buf[end + len("</think>") :]
+                                    in_think = False
+                                else:
+                                    start = think_buf.find("<think>")
+                                    if start == -1:
+                                        output += think_buf
+                                        think_buf = ""
+                                        break
+                                    output += think_buf[:start]
+                                    think_buf = think_buf[start + len("<think>") :]
+                                    in_think = True
+                            if output:
+                                yield output
 
-                    if data.get("done"):
-                        break
+                        if data.get("done"):
+                            record_tokens(
+                                prompt=data.get("prompt_eval_count"),
+                                response=data.get("eval_count"),
+                            )
+                            break
 
     async def tool_loop(
         self,

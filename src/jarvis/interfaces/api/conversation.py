@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import APIRouter, Request
+from loguru import logger
 from pydantic import BaseModel, Field
+
+from jarvis.engine.conversation_metrics import begin_metrics, end_metrics, metric_stage
 
 router = APIRouter()
 
@@ -44,12 +48,31 @@ class ConversationResponse(BaseModel):
 @router.post("/api/conversation", response_model=ConversationResponse)
 async def conversation(body: ConversationRequest, request: Request) -> ConversationResponse:
     """Répondre via le profil vocal, sans ajouter de capacité de pilotage domestique."""
-    gateway = request.app.state.voice_gateway
-    session, _route, response = await gateway.handle(
-        message=f"{body.text.strip()}\n[voix]",
-        session_id=holmes_session_id(body.conversation_id),
-        stream=False,
-    )
-    if not isinstance(response, str):  # garde de type : stream=False doit toujours drainer
-        raise RuntimeError("voice gateway returned a stream for a non-streaming request")
-    return ConversationResponse(response=response, conversation_id=str(session.id))
+    metrics, token = begin_metrics()
+    try:
+        gateway = request.app.state.voice_gateway
+        session, _route, response = await gateway.handle(
+            message=f"{body.text.strip()}\n[voix]",
+            session_id=holmes_session_id(body.conversation_id),
+            stream=False,
+        )
+        with metric_stage("postprocess"):
+            if not isinstance(response, str):
+                raise RuntimeError("voice gateway returned a stream for a non-streaming request")
+            result = ConversationResponse(response=response, conversation_id=str(session.id))
+        total_ms = (perf_counter() - metrics.started_at) * 1000
+        logger.bind(
+            event="ha_conversation_timing",
+            conversation_id=str(session.id),
+            total_ms=round(total_ms, 2),
+            ha_context_ms=round(metrics.stages_ms.get("ha_context", 0.0), 2),
+            soul_ms=round(metrics.stages_ms.get("soul", 0.0), 2),
+            prompt_build_ms=round(metrics.stages_ms.get("prompt_build", 0.0), 2),
+            ollama_ms=round(metrics.stages_ms.get("ollama", 0.0), 2),
+            postprocess_ms=round(metrics.stages_ms.get("postprocess", 0.0), 2),
+            prompt_tokens=metrics.prompt_tokens,
+            response_tokens=metrics.response_tokens,
+        ).info("HA conversation timing")
+        return result
+    finally:
+        end_metrics(token)

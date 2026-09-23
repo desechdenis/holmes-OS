@@ -80,7 +80,7 @@ async def test_ha_ulid_maps_to_one_session_even_when_ha_ignores_holmes_id() -> N
         return session, RouteEnum.INSTANT, "Réponse courte."
 
     gateway = SimpleNamespace(handle=handle)
-    external_ulid = "01K5Q3EXAMPLE7N8J9K0M1P2Q3"
+    external_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
     returned_ids: list[str] = []
     for text in ("Premier", "Deuxième", "Troisième"):
         result = await conversation(

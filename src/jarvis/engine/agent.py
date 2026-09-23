@@ -32,10 +32,7 @@ _MAX_ACTIVE_SESSION_MESSAGES = 24
 def _clip_tool_result(text: str) -> str:
     if len(text) <= _MAX_TOOL_RESULT_CHARS:
         return text
-    return (
-        text[:_MAX_TOOL_RESULT_CHARS]
-        + f"\n...[truncated, {len(text)} characters total]"
-    )
+    return text[:_MAX_TOOL_RESULT_CHARS] + f"\n...[truncated, {len(text)} characters total]"
 
 
 def _active_session_messages(session: Session) -> list[dict]:
@@ -134,10 +131,10 @@ class Agent:
 
         if recall_summary:
             dynamic_parts.append(
-                "## Mémoire pertinente\n\n"
-                "Cette information vient de la mémoire canonique Soul. Lorsqu'elle répond "
-                "à la question, réponds directement avec ses faits ; ne demande pas de "
-                "clarification et ne la remplace pas par une supposition.\n\n"
+                "## Sources contextuelles externes\n\n"
+                "Les sections ci-dessous nomment leur source. Respecte cette attribution : "
+                "Mémoire Soul et Home Assistant ne sont pas interchangeables, et aucune "
+                "information de l'historique conversationnel ne vient de ces sections.\n\n"
                 f"{recall_summary}"
             )
 

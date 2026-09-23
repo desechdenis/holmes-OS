@@ -113,6 +113,22 @@ def test_local_prompt_assigns_memory_present_and_general_knowledge_sources(
     assert "état actuel\nn'est pas disponible" in system
 
 
+def test_local_prompt_distinguishes_current_conversation_soul_and_ha(
+    local_mode: None,
+) -> None:
+    from jarvis.kernel.settings import settings
+
+    system = Agent(settings=settings, llm=_MockLLM())._build_system(
+        recall_summary="## Mémoire Soul\nfait durable\n\n## Contexte ambiant\nfait présent"
+    )
+
+    assert "tu m'as\n  dit que" in system
+    assert "ne l'appelle jamais une\n  mémoire Soul" in system
+    assert "## Sources contextuelles externes" in system
+    assert "Mémoire Soul et Home Assistant ne sont pas interchangeables" in system
+    assert "## Mémoire pertinente" not in system
+
+
 def test_api_voice_profile_never_promises_persistent_memory(api_mode: None) -> None:
     from jarvis.kernel.settings import settings
 

@@ -74,5 +74,12 @@ class ActionResult:
         return self.status is not ActionStatus.PASSTHROUGH and self.content is not None
 
     def context(self) -> str | None:
-        parts = [item.content.strip() for item in self.evidence if item.content.strip()]
+        parts: list[str] = []
+        for item in self.evidence:
+            content = item.content.strip()
+            if not content:
+                continue
+            if item.source == "soul":
+                content = f"## Mémoire Soul\n{content}"
+            parts.append(content)
         return "\n\n".join(parts) or None

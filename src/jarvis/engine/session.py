@@ -50,7 +50,7 @@ class SessionManager:
             if session:
                 return session
 
-        return self._new_session()
+        return self._new_session(session_id)
 
     def _try_restore(self, session_id: str) -> Session | None:
         """Tente de restaurer une session depuis le store. Retourne None si introuvable."""
@@ -73,8 +73,12 @@ class SessionManager:
         self._sessions[sid] = session
         return session
 
-    def _new_session(self) -> Session:
-        session = Session()
+    def _new_session(self, session_id: str | None = None) -> Session:
+        try:
+            requested_id = UUID(session_id) if session_id else None
+        except ValueError:
+            requested_id = None
+        session = Session(id=requested_id) if requested_id else Session()
         sid = str(session.id)
         self._attach_store(session, sid)
         self._sessions[sid] = session

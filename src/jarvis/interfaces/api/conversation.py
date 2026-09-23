@@ -5,10 +5,29 @@
 
 from __future__ import annotations
 
+from uuid import NAMESPACE_URL, UUID, uuid5
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+# Namespace stable, propre aux conversations Home Assistant de Holmes. Il évite
+# toute collision avec un UUID dérivé du même identifiant par une autre application.
+HOLMES_CONVERSATION_NAMESPACE = uuid5(NAMESPACE_URL, "https://holmes-os/conversations")
+
+
+def holmes_session_id(external_conversation_id: str | None) -> str | None:
+    """Traduire l'identifiant opaque de HA en UUID Holmes stable."""
+    if external_conversation_id is None:
+        return None
+    try:
+        # Conserve la compatibilité avec les clients qui réutilisent l'UUID
+        # renvoyé par Holmes, contrairement à Home Assistant.
+        return str(UUID(external_conversation_id))
+    except ValueError:
+        pass
+    return str(uuid5(HOLMES_CONVERSATION_NAMESPACE, external_conversation_id))
 
 
 class ConversationRequest(BaseModel):
@@ -28,7 +47,7 @@ async def conversation(body: ConversationRequest, request: Request) -> Conversat
     gateway = request.app.state.voice_gateway
     session, _route, response = await gateway.handle(
         message=f"{body.text.strip()}\n[voix]",
-        session_id=body.conversation_id,
+        session_id=holmes_session_id(body.conversation_id),
         stream=False,
     )
     if not isinstance(response, str):  # garde de type : stream=False doit toujours drainer

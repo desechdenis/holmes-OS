@@ -44,8 +44,10 @@ class HolmesConversationEntity(conversation.ConversationEntity):
         self._service = HolmesConversationService(client, self._fallback)
 
     @property
-    def supported_languages(self) -> list[str]:
-        return [conversation.MATCH_ALL]
+    def supported_languages(self) -> list[str] | str:
+        # MATCH_ALL ("*") doit être renvoyé tel quel : une liste ["*"] fait
+        # griser l'agent dans le sélecteur de pipeline Assist.
+        return conversation.MATCH_ALL
 
     async def _fallback(
         self,

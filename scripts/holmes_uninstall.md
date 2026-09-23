@@ -58,6 +58,22 @@ lsof -nP -iTCP -sTCP:LISTEN
 Vérifier ensuite qu'aucun PID Holmes ne subsiste et qu'aucun service ne redémarre
 après fermeture de session ou redémarrage de la machine.
 
+### Retirer Holmes du pipeline Home Assistant
+
+Dans l'interface Home Assistant, effectuer ces opérations sans modifier les
+automatisations ni les moteurs partagés :
+
+1. sélectionner l'agent de repli antérieur dans chaque pipeline Assist qui
+   utilisait l'entité `[HOLMES-OS]` ;
+2. désactiver puis supprimer l'entrée d'intégration `[HOLMES-OS] Holmes OS` ;
+3. vérifier qu'aucune entité ou entrée portant `[HOLMES-OS]` ne subsiste ;
+4. retirer le dossier `custom_components/holmes_os` copié dans la configuration
+   HA, puis redémarrer HA selon la procédure normale de l'opérateur ;
+5. révoquer le jeton API Holmes utilisé par cette entrée.
+
+Ne pas supprimer l'agent conversationnel de repli, Home Assistant, son pipeline
+Assist ou son moteur vocal : ils ont un cycle de vie indépendant de Holmes.
+
 ## 3. Neutraliser les redémarrages et sorties
 
 Dans la configuration privée, conserver au minimum les valeurs suivantes pendant
@@ -134,6 +150,8 @@ La vérification est réussie si :
 - aucun port n'est ouvert par Holmes ;
 - aucun trafic sortant Holmes n'est observé ;
 - aucun fournisseur ne reçoit de nouvel appel attribuable à Holmes ;
+- les pipelines Assist répondent via leur agent indépendant et ne référencent
+  plus d'entité `[HOLMES-OS]` ;
 - le fonctionnement domestique et les données canoniques sont inchangés ;
 - la sauvegarde est lisible et son checksum correspond.
 

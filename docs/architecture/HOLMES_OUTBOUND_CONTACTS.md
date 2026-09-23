@@ -61,6 +61,25 @@ Les deux seuls appels `write_note` de `providers/memory/soul.py` sont donc :
 2. `_write_unlocked` : réécriture de la note canonique de tâches après une
    mutation demandée explicitement.
 
+## Conversation Home Assistant vers Holmes
+
+Le composant public
+`integrations/home_assistant/custom_components/holmes_os/` inverse le sens de
+l'appel : Home Assistant envoie le texte Assist à `POST /api/conversation` et
+reçoit une réponse courte avec l'identifiant de session Holmes à réutiliser.
+
+| Système visé | Lecture | Écriture ou effet | Activation `.env` | Coupure |
+| --- | --- | --- | --- | --- |
+| API Holmes depuis Home Assistant | texte, langue et `conversation_id` Assist envoyés à Holmes ; réponse et nouvel identifiant lus par HA | ajout du dialogue à la session Holmes persistante ; aucune commande ni écriture Home Assistant | `API_AUTH_ENABLED=true` et `API_TOKEN` côté Holmes ; URL HTTPS, jeton, empreinte SHA-256 du certificat et agent de repli saisis dans l'interface HA | désactiver ou supprimer l'entrée `[HOLMES-OS]` dans HA, retirer Holmes du pipeline Assist, puis révoquer le jeton Holmes |
+
+Le certificat auto-signé n'est jamais accepté sans vérification : le composant
+épingle son empreinte SHA-256. Son délai de connexion est de 2 secondes et son
+délai total de 20 secondes. Toute indisponibilité, expiration ou erreur
+d'authentification déclenche l'agent HA de repli configuré, précédé de
+« Holmes est indisponible ». Ce chemin utilise le profil vocal Holmes mais
+n'ajoute aucun outil de pilotage domestique ; l'accès Holmes vers HA reste en
+lecture seule comme décrit plus haut.
+
 ## Canaux de messagerie
 
 | Système visé | Lecture | Écriture ou effet | Activation `.env` | Coupure |

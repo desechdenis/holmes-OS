@@ -99,6 +99,20 @@ def test_local_voice_profile_never_promises_persistent_memory(local_mode: None) 
     assert "pendant la conversation en cours" in system.lower()
 
 
+def test_local_prompt_assigns_memory_present_and_general_knowledge_sources(
+    local_mode: None,
+) -> None:
+    from jarvis.kernel.settings import settings
+
+    system = Agent(settings=settings, llm=_MockLLM())._build_system()
+
+    assert "Soul pour les souvenirs" in system
+    assert "Home Assistant pour le\nprésent" in system
+    assert "connaissances générales pour le reste" in system
+    assert "N'invente jamais" in system
+    assert "état actuel\nn'est pas disponible" in system
+
+
 def test_api_voice_profile_never_promises_persistent_memory(api_mode: None) -> None:
     from jarvis.kernel.settings import settings
 

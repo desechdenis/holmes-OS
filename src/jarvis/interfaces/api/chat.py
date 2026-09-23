@@ -128,14 +128,14 @@ async def voice_generate(body: VoiceGenerateRequest, request: Request) -> Stream
             full = friendly_llm_error(e)
             yield full
 
-        session.add_message("assistant", full)
+        session.add_message_unless_last("assistant", full)
 
         if route is RouteEnum.BACKGROUND:
             worker.submit(BackgroundTask(session_id=str(session.id), instruction=message_original))
         elif route is RouteEnum.PROJECT and orchestrator:
             asyncio.create_task(
-                orchestrator.create_and_run(message_original),
-                name=f"voice-project-{str(session.id)[:8]}",
+                orchestrator.create_plan(message_original),
+                name=f"voice-mission-plan-{str(session.id)[:8]}",
             )
 
         asyncio.create_task(

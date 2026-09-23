@@ -203,7 +203,7 @@ async def _handle_vision_event(
                 logger.error("Vision gesture stream error", error=str(e))
                 full = _fallback(e)
                 await websocket.send_json({"type": "chunk", "content": full})
-        session.add_message("assistant", full)
+        session.add_message_unless_last("assistant", full)
         await websocket.send_json({"type": "done"})
 
 
@@ -314,7 +314,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     full = _fallback(e)
                     await websocket.send_json({"type": "chunk", "content": full})
 
-            session.add_message("assistant", full)
+            session.add_message_unless_last("assistant", full)
 
             # ── "done" envoyé en premier — client débloqué ────────────────────
             await websocket.send_json({"type": "done"})
@@ -333,7 +333,16 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         msg: str = message, _orch: object = orchestrator
                     ) -> None:
                         try:
-                            await _orch.create_and_run(msg)
+                            project = await _orch.create_plan(msg)
+                            proactive.broadcast_event(
+                                {
+                                    "type": "notification",
+                                    "content": (
+                                        f"Plan de mission prêt : {project.title}. "
+                                        "Vérifie-le dans Missions avant de le lancer."
+                                    ),
+                                }
+                            )
                         except Exception as exc:
                             collector.error("JRV-WS-001", "JRV-WS-001", cause=exc)
                             logger.error("Project creation failed", error=str(exc))
@@ -344,8 +353,10 @@ async def websocket_chat(websocket: WebSocket) -> None:
                                 }
                             )
 
-                    asyncio.create_task(_run_project(), name=f"project-{str(session.id)[:8]}")
-                    logger.info("Project task launched", session_id=str(session.id))
+                    asyncio.create_task(
+                        _run_project(), name=f"mission-plan-{str(session.id)[:8]}"
+                    )
+                    logger.info("Mission plan requested", session_id=str(session.id))
 
             # ── mémoire post-done, hors chemin critique ───────────────────────
             # sleep(2) laisse la connexion HTTP principale se libérer avant que

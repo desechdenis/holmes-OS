@@ -11,6 +11,30 @@ is_loaded() {
   launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1
 }
 
+assert_service_root_accessible() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    return
+  fi
+
+  case "$ROOT/" in
+    "$HOME/Documents/"*|"$HOME/Desktop/"*|"$HOME/Downloads/"*)
+      cat >&2 <<EOF
+Impossible d'installer Holmes comme LaunchAgent depuis :
+  $ROOT
+
+macOS protège Documents, Desktop et Downloads. Un LaunchAgent peut donc être
+chargé par launchd tout en échouant ensuite avec « Operation not permitted ».
+
+Déplace le dépôt vers un emplacement non protégé, par exemple :
+  $HOME/holmes-OS
+puis relance depuis ce nouvel emplacement :
+  ./jarvis service-install
+EOF
+      exit 1
+      ;;
+  esac
+}
+
 render_plist() {
   mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
   python3 - "$PLIST" "$ROOT" "$LOG_DIR" "$PATH" <<'PY'
@@ -19,12 +43,25 @@ import sys
 from pathlib import Path
 
 target, root, log_dir, path = sys.argv[1:]
+root_path = Path(root)
+venv_bin = str(root_path / ".venv" / "bin")
+path_entries = [venv_bin]
+for entry in path.split(":"):
+    # Un dépôt déplacé laisse souvent l'ancien venv en tête du PATH du shell.
+    if entry.endswith("/holmes-OS/.venv/bin") and entry != venv_bin:
+        continue
+    # Ne jamais figer dans launchd les runtimes temporaires de Codex : ils sont
+    # supprimés hors session et rendraient le service non reproductible.
+    if "/.codex/tmp/" in entry or "/.cache/codex-runtimes/" in entry:
+        continue
+    if entry and entry not in path_entries:
+        path_entries.append(entry)
 payload = {
     "Label": "com.holmes-os.runtime",
     "ProgramArguments": [str(Path(root) / "jarvis"), "run"],
     "WorkingDirectory": root,
     "EnvironmentVariables": {
-        "PATH": path,
+        "PATH": ":".join(path_entries),
         "PYTHONUNBUFFERED": "1",
     },
     "RunAtLoad": True,
@@ -46,7 +83,18 @@ start_service() {
   if is_loaded; then
     launchctl kickstart -k "$DOMAIN/$LABEL"
   else
-    launchctl bootstrap "$DOMAIN" "$PLIST"
+    # Après un bootout, launchd peut garder le job quelques centaines de ms
+    # dans l'état de transition et répondre EIO. On attend sa disparition et
+    # on retente proprement au lieu de laisser Holmes arrêté.
+    for _attempt in {1..20}; do
+      if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+        echo "Holmes démarré comme service macOS."
+        return
+      fi
+      sleep 0.1
+    done
+    echo "Impossible de charger le service Holmes après plusieurs tentatives." >&2
+    exit 1
   fi
   echo "Holmes démarré comme service macOS."
 }
@@ -54,6 +102,10 @@ start_service() {
 stop_service() {
   if is_loaded; then
     launchctl bootout "$DOMAIN/$LABEL"
+    for _attempt in {1..20}; do
+      is_loaded || break
+      sleep 0.1
+    done
     echo "Holmes arrêté."
   else
     echo "Holmes est déjà arrêté."
@@ -62,11 +114,16 @@ stop_service() {
 
 case "${1:-status}" in
   install)
+    assert_service_root_accessible
     if is_loaded; then
       launchctl bootout "$DOMAIN/$LABEL"
+      for _attempt in {1..20}; do
+        is_loaded || break
+        sleep 0.1
+      done
     fi
     render_plist
-    launchctl bootstrap "$DOMAIN" "$PLIST"
+    start_service >/dev/null
     echo "Service Holmes installé et démarré : $PLIST"
     ;;
   uninstall)
@@ -85,9 +142,20 @@ case "${1:-status}" in
     ;;
   status)
     if is_loaded; then
-      launchctl print "$DOMAIN/$LABEL" | sed -n '1,35p'
+      STATUS="$(launchctl print "$DOMAIN/$LABEL")"
+      printf '%s\n' "$STATUS" | sed -n '1,35p'
+      if ! printf '%s\n' "$STATUS" | grep -q $'\tstate = running'; then
+        echo >&2
+        echo "ATTENTION : le service est chargé mais Holmes ne tourne pas." >&2
+        echo "Consulte : ./jarvis service-logs" >&2
+        exit 1
+      fi
     else
-      echo "Holmes est arrêté ou le service n'est pas installé."
+      if [ -f "$PLIST" ]; then
+        echo "Holmes est installé mais arrêté. Lance : ./jarvis service-start"
+      else
+        echo "Holmes est arrêté ou le service n'est pas installé."
+      fi
       exit 1
     fi
     ;;

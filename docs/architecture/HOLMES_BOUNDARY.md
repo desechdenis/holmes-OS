@@ -24,8 +24,9 @@ systèmes existants.
   ouvert. Sa préparation et son exécution sont deux décisions distinctes.
 - Toute action persistante ou externe doit être explicite, traçable et
   réversible. En cas d'ambiguïté ou d'indisponibilité, Holmes s'abstient.
-- Les artefacts créés dans un système partagé sont identifiables comme provenant
-  de Holmes.
+- Tout objet créé par l'application dans un système partagé porte explicitement
+  le marqueur `[HOLMES-OS]`. Un objet impossible à marquer ne doit pas être créé
+  automatiquement.
 
 ## Ce que Holmes ne remplace pas
 

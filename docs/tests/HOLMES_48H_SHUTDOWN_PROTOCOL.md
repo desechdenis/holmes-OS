@@ -14,6 +14,13 @@ la méthode et les critères, pas l'observation du domicile.
 
 - Holmes a été réellement raccordé aux usages que l'on souhaite éprouver. Un test
   réalisé avant toute intégration est non concluant.
+- Le test est planifié à la fin de la phase 2a, une fois l'intégration
+  conversationnelle réellement utilisée et avant de poursuivre les phases qui
+  supposent sa réversibilité.
+- Les moteurs et services partagés avec le reste de l'infrastructure, notamment
+  le moteur de modèle local, restent actifs et dans leur état nominal pendant
+  toute la fenêtre. Les arrêter fausserait le test : on mesurerait leur absence,
+  pas celle de Holmes.
 - L'inventaire des contacts sortants du dépôt est à jour.
 - L'inventaire Body correspondant est validé séparément par son opérateur.
 - Une sauvegarde hors dépôt des données locales existe et son checksum a été
@@ -58,6 +65,8 @@ dans le rapport public.
    données ni révoquer les accès.
 4. Vérifier l'absence de processus Holmes et de port appartenant à Holmes.
 5. Noter l'heure exacte de la dernière activité sortante attribuable à Holmes.
+6. Vérifier que les moteurs partagés sont toujours actifs, sans leur adresser de
+   requête depuis Holmes.
 
 Commandes locales indicatives :
 
